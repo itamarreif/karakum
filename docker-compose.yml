@@ -1,0 +1,19 @@
+# karakum compose: one service per toolchain image.
+# Mounts and env come from the launcher; agents/projects are decoupled from compose.
+#
+# Memory worktree is the only mount declared here. Project worktree (if any) is
+# added by the launcher via `-v` flags on `docker compose run`.
+
+services:
+  agent-claude:
+    build:
+      context: ./containers/claude
+    image: karakum-agent-claude:latest
+    tty: true
+    stdin_open: true
+    volumes:
+      - ${MEMORY_WORKTREE}:${MEMORY_WORKTREE}:rw
+      - claude-auth:/home/agent/.claude
+
+volumes:
+  claude-auth:
