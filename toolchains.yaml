@@ -1,0 +1,16 @@
+# Single source of truth for toolchain versions + per-ecosystem tooling.
+# Each entry maps to a containers/toolchain-<name>/Dockerfile which is a thin
+# wrapper over the canonical upstream image for that tool, plus the standard
+# companion tools for that ecosystem (uv for python, tsc/pnpm for node).
+# Bumping a version or adding a tool here + re-running scripts/build.sh is the
+# only step needed.
+
+node:
+  version: "22.11.0"
+  tools:
+    - typescript
+    - pnpm
+
+python:
+  version: "3.13"
+  uv_version: "0.5.11"
