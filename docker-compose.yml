@@ -12,7 +12,7 @@ services:
     tty: true
     stdin_open: true
     volumes:
-      - ${MEMORY_WORKTREE}:${MEMORY_WORKTREE}:rw
+      - ${MEMORY_WORKTREE:-/dev/null}:${MEMORY_WORKTREE:-/dev/null}:rw
       - claude-auth:/home/agent/.claude
 
 volumes:
