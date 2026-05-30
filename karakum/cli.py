@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import subprocess
 import sys
 import uuid
 from pathlib import Path
@@ -10,6 +11,30 @@ import click
 from karakum import config, manifest, preflight
 from karakum import secrets as ksecrets
 from karakum import session as ksession
+
+
+def _git_identity_args(agent: str) -> list[str]:
+    """Return docker -e args for GIT_AUTHOR_*/GIT_COMMITTER_* scoped to the agent.
+
+    Name  → agent name (e.g. "takwin")
+    Email → agent+user@host (e.g. "takwin+itamar.reif@gmail.com")
+    """
+    result = subprocess.run(
+        ["git", "config", "--global", "user.email"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0 or not (email := result.stdout.strip()):
+        return []
+    agent_email = f"{agent}+{email}"
+    args = []
+    for var, val in (
+        ("GIT_AUTHOR_NAME", agent),
+        ("GIT_COMMITTER_NAME", agent),
+        ("GIT_AUTHOR_EMAIL", agent_email),
+        ("GIT_COMMITTER_EMAIL", agent_email),
+    ):
+        args += ["-e", f"{var}={val}"]
+    return args
 
 
 @click.group()
@@ -100,6 +125,7 @@ def launch(toolchain, agent, slug, project, cmd_args):
         "-e", f"KARAKUM_AGENT={agent}",
         "-e", f"KARAKUM_MEMORY={memory_session}",
         *project_args,
+        *_git_identity_args(agent),
         "-w", cwd,
         *secret_docker_args,
         f"agent-{toolchain}",
