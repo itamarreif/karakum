@@ -9,32 +9,39 @@ This file uses [AGENTS.md](https://agents.md/) — the harness-agnostic conventi
 karakum decouples three things that older agent systems conflate:
 
 1. **Toolchain** = which container image runs (`claude`, future `codex`, `opencode`, `pi`, `secret-manager`, …). Toolchain-specific, **not** agent-specific. Selected at invocation: `just claude takwin <slug>` runs on claude; `just codex takwin <slug>` runs the same agent on codex.
-2. **Agent** = identity. Has a name + memory (the persistent self: skills, scratchpad, master prompt) + state (persistent `~/.claude`). Declared in `agents/<name>.yaml`. **No** toolchain field, **no** project field — agents are portable across both. Secrets are host-wide, not per-agent (see `secrets.yaml`).
+2. **Agent** = identity. Has a name + memory (the persistent self: skills, scratchpad, master prompt). Declared in `agents/<name>.yaml`. **No** toolchain field, **no** project field — agents are portable across both. Secrets are host-wide, not per-agent (declared once in `secrets.yaml`). The harness state (`~/.claude`) persists in a per-agent host dir (`<state_root>/<agent>`, default `~/.karakum/state`).
 3. **Project** = the workspace the agent acts on for this session. Declared in `projects/<name>.yaml`. Optional per session. Same agent can work on different projects across sessions.
 
-A session = (toolchain × agent × project? × session-slug). The launcher mounts the agent's memory worktree and (if specified) the project worktree, both at session branch `<agent>/<slug>` in their respective repos.
+A session = (toolchain × agent × project? × session-slug). The launcher mounts the agent's memory clone and (if specified) the project clone, both on session branch `<agent>/<slug>` in independent clones of their respective repos.
 
 ## Layout
 
 ```
 karakum/
   containers/<toolchain>/   Docker images. Toolchain-specific, not agent-specific.
-  agents/<name>.yaml        Agent identity: name + memory + state.
+  agents/<name>.yaml        Agent identity: name + memory.
   projects/<name>.yaml      Workspace repos the agent can act on (path + repository).
   secrets.yaml              Host-wide secret references (op://…), shared by all agents.
-  Justfile                  Host entry point: 1-line recipes dispatching to scripts/.
-  scripts/                  Real logic (orchestrate / build / list / lib helpers).
+  Justfile                  Host entry point: thin recipes dispatching to the CLI.
+  karakum/                  Python CLI package (uv pip install -e . or uv run karakum).
+    cli.py                  Entry point: launch, agents, projects subcommands.
+    manifest.py             YAML manifest loading.
+    preflight.py            Docker + git repo checks.
+    secrets.py              Secret resolution (op://, env://); pluggable providers.
+    session.py              Per-session isolated clone lifecycle.
+  scripts/build.sh          Docker image build (standalone; no Python dependency).
   docker-compose.yaml       One service per toolchain.
+  pyproject.toml            Python package definition; deps: click, pyyaml.
 ```
 
 ## Scope of this layer (the guiding list)
 
 **In scope:**
 - Building toolchain images.
-- Per-session lifecycle: start (create worktree+branch in memory and project repos), resume, end (push/PR helper), sweep (cleanup merged).
+- Per-session lifecycle: start (create an isolated clone + branch from the memory and project repos), resume, end (push/PR helper), sweep (cleanup merged).
 - Manifest schemas + parsing (agent, project).
 - Secret injection on session start via pluggable provider registry.
-- Preflight checks (yq, docker, manifest exists, repo state matches manifest).
+- Preflight checks (docker, manifest exists, repo state matches manifest).
 - Multi-container orchestration when tool services land (`docker compose up -d`).
 - Tailscale auth-key injection for ingress (#16).
 - Per-container env setup (UID/GID matching, git identity, KARAKUM_* metadata).
@@ -49,19 +56,21 @@ karakum/
 
 ## Code conventions
 
-Three skills guide work in this repo:
+Two skills guide work in this repo:
 
-- **`makefile`** — Justfile structure. Targets are 1-liners; logic delegates to `scripts/`.
-- **`shell-script`** — bash with strict mode, shellcheck-clean. Hard ceiling: ~200 LOC per script; escalate to Python/Rust beyond.
-- **`secrets`** — credential methodology. Manifests use URI references (`op://…`, `env://…`); resolution dispatches by scheme through a pluggable registry. 1P is the default but not hardcoded.
+- **`makefile`** — Justfile structure. Targets are 1-liners; logic delegates to `karakum/` (Python) or `scripts/` (build only). No multi-line shell in the Justfile.
+- **`secrets`** — credential methodology. `secrets.yaml` uses URI references (`op://…`, `env://…`); resolution dispatches by scheme through a pluggable registry in `karakum/secrets.py`. 1P is the default but not hardcoded.
+
+Orchestration logic lives in the Python package (`karakum/`). `scripts/build.sh` is the only remaining shell script and handles Docker image builds only. Run the CLI via `uv run karakum` or `just <recipe>`.
 
 ## Conventions specific to karakum
 
 - Mount paths inside the container mirror host paths exactly.
-- Worktrees (memory + project) are bind-mounted at runtime; the underlying repos are never bind-mounted directly.
+- Session clones (memory + project) are bind-mounted at runtime; the host repos' `.git` is never mounted, so a session can't reach the host's branches/refs/config.
 - New toolchain = new `containers/<name>/Dockerfile` + new compose service + new Justfile recipe. No agent or project changes.
 - New agent = new `agents/<name>.yaml`. No code changes.
 - New project = new `projects/<name>.yaml`. No code changes.
+- New secret provider = one function + one dict entry in `karakum/secrets.py`. See the comment block there.
 - **No service ever publishes ports to the host.** All ingress flows through a Tailscale sidecar (#16).
 - Tier-1 hardening (`cap_drop: ALL`, `no-new-privileges`, `read_only: true` + tmpfs, `pids_limit`, `mem_limit`) lands as a follow-up commit on the toolchain image / compose service.
 
@@ -71,8 +80,8 @@ Three skills guide work in this repo:
 - Don't bake credentials into images or volumes — see the `secrets` skill.
 - Don't add agent-specific logic to images. Agent-specificity lives in `agents/<name>.yaml`.
 - Don't add project-specific logic to images either. Project-specificity is in `projects/<name>.yaml` plus what's in the project's own repo.
-- Don't put multi-line shell into the Justfile. Extract to `scripts/`.
-- Don't let a shell script exceed ~200 LOC. Escalate per the `shell-script` skill.
+- Don't put logic in the Justfile. Extract to `karakum/` (Python) or `scripts/build.sh` (Docker builds).
+- Don't add new shell scripts. Orchestration logic belongs in the Python package.
 
 ## Planning context
 

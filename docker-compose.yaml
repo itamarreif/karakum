@@ -1,12 +1,8 @@
 # karakum compose: one service per toolchain image.
-# Mounts and env come from the launcher; agents/projects are decoupled from compose.
-#
-# Memory worktree and per-agent state are the mounts declared here. Project
-# worktree (if any) is added by the launcher via `-v` flags on `docker compose run`.
-#
-# ${CLAUDE_STATE_DIR} is the agent's `state.path` (see agents/<name>.yaml),
-# resolved and exported by scripts/launch.sh. It persists ~/.claude across the
-# agent's sessions and projects.
+# Mounts/env are declared here and parameterized by ${VARS} the launcher exports
+# (memory clone, per-agent ~/.claude state). The project clone (optional, so it
+# can't be a static line) and the variable-length secret set are the only things
+# the launcher adds dynamically via `-v` / `-e` flags on `docker compose run`.
 
 name: karakum
 
@@ -18,11 +14,15 @@ services:
     tty: true
     stdin_open: true
     environment:
-      # Relocate Claude Code's config into the persisted state mount below.
-      # By default ~/.claude.json (OAuth session, project trust, allowed tools,
-      # caches) sits at $HOME — outside the mount — so it's lost every run.
-      # CLAUDE_CONFIG_DIR moves it into ~/.claude. See anthropics/claude-code#14313.
+      # Relocate Claude Code's config into the mounted state dir below. By default
+      # ~/.claude.json (OAuth session, project trust, allowed tools, caches) sits
+      # at $HOME — outside the mount — so it's lost every run. CLAUDE_CONFIG_DIR
+      # moves it into ~/.claude. See anthropics/claude-code#14313.
       CLAUDE_CONFIG_DIR: /home/agent/.claude
     volumes:
-      - ${MEMORY_WORKTREE:-/dev/null}:${MEMORY_WORKTREE:-/dev/null}:rw
+      # Memory session clone (mirrored host path). `:-/dev/null` keeps `docker
+      # compose build` from expanding to a bare `::rw` when the var is unset.
+      - ${MEMORY_SESSION:-/dev/null}:${MEMORY_SESSION:-/dev/null}:rw
+      # Per-agent ~/.claude state: a host dir (agent-owned, writable, persistent),
+      # not a root-owned named volume. <state_root>/<agent>, default ~/.karakum/state.
       - ${CLAUDE_STATE_DIR:-/dev/null}:/home/agent/.claude:rw
