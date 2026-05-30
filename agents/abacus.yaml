@@ -13,3 +13,5 @@ name: abacus
 memory:
   path: ~/code/finance/.agents
   repository: github.com/itamarreif/abacus
+state:
+  path: ~/code/finance/.agents/.claude

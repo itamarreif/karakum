@@ -64,6 +64,17 @@ main() {
   memory_path=$(manifest_expand_path "$(manifest_get "$agent_manifest" '.memory.path')")
   memory_repo=$(manifest_get "$agent_manifest" '.memory.repository')
 
+  # Persistent per-agent harness state, mounted at the container's ~/.claude.
+  local state_raw
+  state_raw=$(manifest_get "$agent_manifest" '.state.path')
+  if [[ -z "$state_raw" || "$state_raw" == "null" ]]; then
+    echo "karakum: agent '$agent' is missing required .state.path in $agent_manifest" >&2
+    exit 2
+  fi
+  CLAUDE_STATE_DIR=$(manifest_expand_path "$state_raw")
+  mkdir -p "$CLAUDE_STATE_DIR"
+  export CLAUDE_STATE_DIR
+
   preflight_repo "$memory_path" "$memory_repo" "memory"
 
   local memory_worktree
@@ -89,8 +100,19 @@ main() {
     )
   fi
 
-  # --- secrets ---
-  secrets_load "$agent_manifest"
+  # --- secrets (host-wide, shared across all agents/toolchains) ---
+  secrets_load "${KARAKUM_ROOT}/secrets.yaml"
+
+  # claude authenticates from CLAUDE_CODE_OAUTH_TOKEN, which takes precedence over
+  # the mounted ~/.claude/.credentials.json. If it's missing, claude silently
+  # falls back to the interactive /login that doesn't work over tmux — so fail
+  # fast here instead of dropping the user into a broken prompt.
+  if [[ "$toolchain" == "claude" && -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+    echo "karakum: CLAUDE_CODE_OAUTH_TOKEN is unset after resolving secrets.yaml" >&2
+    echo "        claude would fall back to interactive /login inside the container" >&2
+    echo "        add it to secrets.yaml (op://… from 'claude setup-token') and retry" >&2
+    exit 2
+  fi
 
   # --- env for compose ---
   export MEMORY_WORKTREE="$memory_worktree"
