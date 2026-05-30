@@ -9,7 +9,7 @@ This file uses [AGENTS.md](https://agents.md/) — the harness-agnostic conventi
 karakum decouples three things that older agent systems conflate:
 
 1. **Toolchain** = which container image runs (`claude`, future `codex`, `opencode`, `pi`, `secret-manager`, …). Toolchain-specific, **not** agent-specific. Selected at invocation: `just claude takwin <slug>` runs on claude; `just codex takwin <slug>` runs the same agent on codex.
-2. **Agent** = identity. Has a name + memory (the persistent self: skills, scratchpad, master prompt) + optional secrets. Declared in `agents/<name>.yaml`. **No** toolchain field, **no** project field — agents are portable across both.
+2. **Agent** = identity. Has a name + memory (the persistent self: skills, scratchpad, master prompt) + state (persistent `~/.claude`). Declared in `agents/<name>.yaml`. **No** toolchain field, **no** project field — agents are portable across both. Secrets are host-wide, not per-agent (see `secrets.yaml`).
 3. **Project** = the workspace the agent acts on for this session. Declared in `projects/<name>.yaml`. Optional per session. Same agent can work on different projects across sessions.
 
 A session = (toolchain × agent × project? × session-slug). The launcher mounts the agent's memory worktree and (if specified) the project worktree, both at session branch `<agent>/<slug>` in their respective repos.
@@ -19,11 +19,12 @@ A session = (toolchain × agent × project? × session-slug). The launcher mount
 ```
 karakum/
   containers/<toolchain>/   Docker images. Toolchain-specific, not agent-specific.
-  agents/<name>.yaml        Agent identity: name + memory + optional secrets.
+  agents/<name>.yaml        Agent identity: name + memory + state.
   projects/<name>.yaml      Workspace repos the agent can act on (path + repository).
+  secrets.yaml              Host-wide secret references (op://…), shared by all agents.
   Justfile                  Host entry point: 1-line recipes dispatching to scripts/.
   scripts/                  Real logic (orchestrate / build / list / lib helpers).
-  docker-compose.yml        One service per toolchain.
+  docker-compose.yaml       One service per toolchain.
 ```
 
 ## Scope of this layer (the guiding list)
