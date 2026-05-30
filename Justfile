@@ -1,12 +1,12 @@
 # karakum — container infra for AI agents.
-# Recipes here are thin dispatch; logic lives in scripts/.
+# Recipes here are thin dispatch; logic lives in karakum/.
 # Run `just` (no args) to list recipes.
 #
 # Schema:
-#   just <toolchain> <agent> <session> [<project>]
+#   just <toolchain> <agent> [<session>] [<project>]
 #   - toolchain selects the container image
 #   - agent provides identity (memory)
-#   - session names the work (becomes branch <agent>/<session>)
+#   - session names the work (becomes branch <agent>/<session>); '-' or omit for no session clone
 #   - project (optional) names a workspace repo to mount RW
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
@@ -19,18 +19,22 @@ default:
 build:
     bash scripts/build.sh
 
-# Run Claude Code: just claude <agent> <session> [<project>]
-claude agent session project="-":
-    bash scripts/launch.sh claude {{agent}} {{session}} {{project}} claude
+# Install karakum CLI into the uv-managed virtual environment.
+install:
+    uv pip install -e .
 
-# Drop into bash: just shell <agent> <session> [<project>]
-shell agent session project="-":
-    bash scripts/launch.sh claude {{agent}} {{session}} {{project}} bash
+# Run Claude Code: just claude <agent> [<session>] [<project>]
+claude agent session="-" project="-":
+    uv run karakum launch claude {{agent}} {{session}} {{project}} claude
+
+# Drop into bash: just shell <agent> [<session>] [<project>]
+shell agent session="-" project="-":
+    uv run karakum launch claude {{agent}} {{session}} {{project}} bash
 
 # List configured agents.
 agents:
-    bash scripts/list-agents.sh
+    uv run karakum agents
 
 # List configured projects.
 projects:
-    bash scripts/list-projects.sh
+    uv run karakum projects

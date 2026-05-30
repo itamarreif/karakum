@@ -12,9 +12,6 @@
 #   name              - identifier; used in branch names (<name>/<slug>) and container name
 #   memory.path       - local path to the agent's memory git repo
 #   memory.repository - canonical remote; preflight verifies local origin matches
-#   state.path        - host dir mounted at the container's ~/.claude; the agent's
-#                       persistent harness state (history, todos, settings), shared
-#                       across all of this agent's sessions and projects.
 #
 # Secrets are host-wide, not per-agent — see ../secrets.yaml.
 
@@ -22,5 +19,3 @@ name: takwin
 memory:
   path: ~/code/ai/.agents
   repository: github.com/itamarreif/takwin
-state:
-  path: ~/code/ai/.claude
