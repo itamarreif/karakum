@@ -48,6 +48,7 @@ For how the CLI is wired together — modules, command dispatch, and the `launch
 - `uv` (`brew install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`).
 - `just` (`brew install just`).
 - `op` (`brew install 1password-cli`) — only if any agent manifest uses `op://` secrets.
+- `gh` (`brew install gh`) — only for `just clean` with the default `merged` predicate (it queries GitHub for merged PRs).
 
 ## Quick start
 
@@ -67,6 +68,31 @@ just claude takwin                                   # no slug: run on main bran
 Multiple terminals can open the **same slug** concurrently; each gets a unique container name so Docker doesn't conflict.
 
 `just` (no args) lists all recipes; `just agents` lists configured agents; `just projects` lists configured projects.
+
+### Listing & cleaning up sessions
+
+Session clones persist after the container exits, so they accumulate. Two commands manage them:
+
+```sh
+just sessions [<agent>]                     # list session clones + status (one row per clone)
+just clean    [<agent>] [<slug>] [<flags>]  # remove session clones that are safe to delete
+```
+
+`just sessions` prints `agent · slug · label · branch · dirty? · unpushed · pr-state`. `just clean` removes a session's clone dir (and reaps any leftover exited `agent-<agent>-<slug>-*` containers) **only when it's safe to delete**. With no args it sweeps every safe session; pass an agent (and optionally a slug) to scope it.
+
+"Safe to delete" is a configurable **predicate**, defaulting to `merged`:
+
+- `merged` *(default)* — the session branch's PR is merged on GitHub (checked via `gh`). The work is on GitHub, so dropping the local clone loses nothing.
+- `pushed` — the clone has a clean working tree and no unpushed commits (git only, no `gh`).
+
+A session can span several label clones (memory + project); it's removed only when the predicate holds for **all** of them. Override the predicate in `~/.karakum/config.yaml`:
+
+```yaml
+cleanup:
+  predicate: pushed   # merged (default) | pushed
+```
+
+Flags: `--dry-run` (show the plan, delete nothing), `--yes` (skip the confirmation prompt), `--force` (delete a named `<agent> <slug>` regardless of the predicate — use when you know the work is disposable).
 
 Invoke from anywhere with a shell alias:
 

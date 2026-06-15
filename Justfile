@@ -38,3 +38,11 @@ agents:
 # List configured projects.
 projects:
     uv run karakum projects
+
+# List session clones + status: just sessions [<agent>]
+sessions agent="":
+    uv run karakum sessions {{agent}}
+
+# Remove session clones (default: PR merged): just clean [<agent>] [<slug>] [<flags>]
+clean agent="" slug="" *flags:
+    uv run karakum clean {{agent}} {{slug}} {{flags}}

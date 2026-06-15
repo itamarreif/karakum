@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import shutil
 import subprocess
 import sys
 import uuid
@@ -8,7 +9,7 @@ from pathlib import Path
 
 import click
 
-from karakum import config, manifest, preflight
+from karakum import cleanup, config, manifest, preflight
 from karakum import secrets as ksecrets
 from karakum import session as ksession
 
@@ -179,3 +180,81 @@ def projects():
         proj_path = manifest.get(data, "path") or ""
         repo = manifest.get(data, "repository") or ""
         print(f"{name}\t{proj_path}\t{repo}")
+
+
+@main.command("sessions")
+@click.argument("agent", required=False)
+def sessions(agent):
+    """List session clones and their status (one row per clone).
+
+    Columns: agent  slug  label  branch  dirty?  unpushed  pr-state
+    """
+    found = cleanup.iter_sessions(agent)
+    if not found:
+        where = f" for agent '{agent}'" if agent else ""
+        print(f"karakum: no sessions{where} under {config.sessions_root()}", file=sys.stderr)
+        return
+    have_gh = bool(shutil.which("gh"))
+    for s in found:
+        for c in s.clones:
+            dirty_flag = "dirty" if cleanup.dirty(c) else "clean"
+            ahead = cleanup.unpushed(c)
+            pr = cleanup.pr_state(c) if have_gh else "?"
+            print(f"{s.agent}\t{s.slug}\t{c.label}\t{c.branch}\t{dirty_flag}\t{ahead}\t{pr}")
+
+
+@main.command("clean")
+@click.argument("agent", required=False)
+@click.argument("slug", required=False)
+@click.option("--dry-run", is_flag=True, help="Show what would be removed; delete nothing.")
+@click.option("--force", is_flag=True, help="Bypass the safe-delete predicate (requires agent+slug).")
+@click.option("--yes", is_flag=True, help="Skip the confirmation prompt.")
+def clean(agent, slug, dry_run, force, yes):
+    """Remove session clones whose safe-delete predicate holds.
+
+    With no args, sweeps every safe session; pass AGENT (and optionally SLUG) to
+    scope. The predicate is read from ~/.karakum/config.yaml (cleanup.predicate,
+    default 'merged'). --force deletes a named session regardless of predicate.
+    """
+    if force and not (agent and slug):
+        raise click.UsageError("--force requires an explicit AGENT and SLUG")
+
+    candidates = cleanup.iter_sessions(agent)
+    if slug is not None:
+        candidates = [s for s in candidates if s.slug == slug]
+    if not candidates:
+        print("karakum: no matching sessions", file=sys.stderr)
+        return
+
+    predicate = config.cleanup_predicate()
+    if not force and predicate == "merged":
+        preflight.check_gh()
+
+    to_remove: list = []
+    for s in candidates:
+        if force:
+            to_remove.append((s, "forced"))
+            continue
+        safe, reason = cleanup.session_safe(s, predicate)
+        if safe:
+            to_remove.append((s, reason))
+        else:
+            print(f"skip   {s.agent}/{s.slug}\t({reason})")
+
+    if not to_remove:
+        print("karakum: nothing safe to remove", file=sys.stderr)
+        return
+
+    verb = "would remove" if dry_run else "remove"
+    for s, reason in to_remove:
+        print(f"{verb} {s.agent}/{s.slug}\t({reason})\t{s.path}")
+    if dry_run:
+        return
+
+    if not yes and not click.confirm(f"Delete {len(to_remove)} session(s)?"):
+        print("karakum: aborted", file=sys.stderr)
+        return
+
+    for s, _ in to_remove:
+        cleanup.remove(s)
+        print(f"removed {s.agent}/{s.slug}")
