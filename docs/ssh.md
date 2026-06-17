@@ -11,8 +11,8 @@ The container can only use keys the forwarded agent holds — i.e. exactly what
 
 ## Choosing the agent: `--ssh-agent`
 
-`launch` (and the `just shell`/`just claude` recipes) take `--ssh-agent` /
-`ssh_agent=`:
+`launch` takes `--ssh-agent`; the `just shell`/`just claude` recipes expose it as
+the **4th positional argument** (after agent, session, project):
 
 | Value | Forwards | Use when |
 |-------|----------|----------|
@@ -21,7 +21,8 @@ The container can only use keys the forwarded agent holds — i.e. exactly what
 | `none` | nothing | the session never needs git over SSH |
 
 ```bash
-just shell takwin my-slug karakum ssh_agent=1password
+just shell takwin my-slug karakum 1password         # via just (positional)
+uv run karakum launch --ssh-agent=1password claude takwin my-slug karakum bash
 ```
 
 A preflight runs `ssh-add -l` against the chosen agent and **warns** (doesn't block)
@@ -66,7 +67,7 @@ How the socket reaches the container differs by runtime:
 
 ```bash
 ssh-add -l                       # host: lists your GitHub key
-just shell <agent> <slug> <project> ssh_agent=1password
+just shell <agent> <slug> <project> 1password   # 4th positional = ssh agent
 # inside the container:
 ssh-add -l                       # same key appears
 ssh -T git@github.com            # "Hi <user>!"  (1Password prompts on the host)

@@ -89,7 +89,7 @@ The agent sees **only** its memory clone and (if specified) project clone — no
 
 ### Git auth
 
-In-container `git push`/`pull` authenticate over SSH via a **forwarded host SSH agent** — no private keys enter the image. Pick which agent with `--ssh-agent` / `ssh_agent=` (`system` (default) or `1password`); commits are attributed to the agent, the push is signed by the host key. **Docker Desktop** users run `just ssh-setup` once (not needed on OrbStack). Full setup, the 1Password path, and verification: [`docs/ssh.md`](docs/ssh.md).
+In-container `git push`/`pull` authenticate over SSH via a **forwarded host SSH agent** — no private keys enter the image. Pick which agent with `--ssh-agent` (or the 4th positional arg to `just shell`/`just claude`): `system` (default) or `1password`; commits are attributed to the agent, the push is signed by the host key. **Docker Desktop** users run `just ssh-setup` once (not needed on OrbStack). Full setup, the 1Password path, and verification: [`docs/ssh.md`](docs/ssh.md).
 
 ## Secrets
 
