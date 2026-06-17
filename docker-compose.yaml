@@ -19,12 +19,6 @@ services:
       # at $HOME — outside the mount — so it's lost every run. CLAUDE_CONFIG_DIR
       # moves it into ~/.claude. See anthropics/claude-code#14313.
       CLAUDE_CONFIG_DIR: /home/agent/.claude
-      # Forward the host SSH agent so in-container `git push`/`pull` authenticate
-      # with the host user's key. Docker Desktop exposes the host agent inside its
-      # VM at this fixed path; it's bind-mounted below. No private keys ever enter
-      # the image — only the agent socket is forwarded. (Author/committer identity
-      # is still overridden to the agent via GIT_*_NAME/EMAIL on `compose run`.)
-      SSH_AUTH_SOCK: /run/host-services/ssh-auth.sock
     volumes:
       # Memory session clone (mirrored host path). `:-/dev/null` keeps `docker
       # compose build` from expanding to a bare `::rw` when the var is unset.
@@ -32,5 +26,3 @@ services:
       # Per-agent ~/.claude state: a host dir (agent-owned, writable, persistent),
       # not a root-owned named volume. <state_root>/<agent>, default ~/.karakum/state.
       - ${CLAUDE_STATE_DIR:-/dev/null}:/home/agent/.claude:rw
-      # Host SSH agent socket (Docker Desktop host-services path). See SSH_AUTH_SOCK above.
-      - /run/host-services/ssh-auth.sock:/run/host-services/ssh-auth.sock

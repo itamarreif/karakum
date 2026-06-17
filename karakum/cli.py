@@ -37,18 +37,46 @@ def _git_identity_args(agent: str) -> list[str]:
     return args
 
 
+def _is_docker_desktop() -> bool:
+    """True when the active Docker context is Docker Desktop (vs OrbStack / native)."""
+    result = subprocess.run(["docker", "context", "show"], capture_output=True, text=True)
+    return "desktop" in result.stdout.strip().lower()
+
+
+def _ssh_agent_args(provider: str) -> list[str]:
+    """Return docker `-v`/`-e` args that forward a host SSH agent for in-container git.
+
+    `provider` (`--ssh-agent`) selects which host agent to forward; see
+    `config.ssh_agent_socket`. Docker Desktop can't bind-mount a host socket, so it
+    forwards the agent through its host-services bridge — which proxies the host's
+    *default* agent (point that at the right agent with `just ssh-setup`). OrbStack
+    and native Linux bind-mount the resolved socket directly. See docs/ssh.md.
+    """
+    if provider == "none":
+        return []
+    socket = config.ssh_agent_socket(provider)
+    if not socket:
+        print(f"karakum: WARNING — no SSH agent socket for provider '{provider}'; in-container git over SSH disabled.", file=sys.stderr)
+        return []
+    preflight.check_ssh_agent(socket)
+    src = "/run/host-services/ssh-auth.sock" if _is_docker_desktop() else socket
+    return ["-v", f"{src}:/ssh-agent.sock", "-e", "SSH_AUTH_SOCK=/ssh-agent.sock"]
+
+
 @click.group()
 def main():
     pass
 
 
 @main.command("launch", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+@click.option("--ssh-agent", "ssh_agent", default="system", type=click.Choice(config.SSH_AGENT_PROVIDERS),
+              help="Host SSH agent to forward for in-container git (system=$SSH_AUTH_SOCK; see docs/ssh.md).")
 @click.argument("toolchain")
 @click.argument("agent")
 @click.argument("slug")
 @click.argument("project", default="-")
 @click.argument("cmd_args", nargs=-1, type=click.UNPROCESSED)
-def launch(toolchain, agent, slug, project, cmd_args):
+def launch(ssh_agent, toolchain, agent, slug, project, cmd_args):
     """Launch an agent session in the given toolchain container."""
     if not cmd_args:
         raise click.UsageError("cmd is required")
@@ -126,6 +154,7 @@ def launch(toolchain, agent, slug, project, cmd_args):
         "-e", f"KARAKUM_MEMORY={memory_session}",
         *project_args,
         *_git_identity_args(agent),
+        *_ssh_agent_args(ssh_agent),
         "-w", cwd,
         *secret_docker_args,
         f"agent-{toolchain}",
