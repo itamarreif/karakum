@@ -31,12 +31,6 @@ claude agent session="-" project="-" ssh_agent="system":
 shell agent session="-" project="-" ssh_agent="system":
     uv run karakum launch --ssh-agent={{ssh_agent}} claude {{agent}} {{session}} {{project}} bash
 
-# macOS + Docker Desktop only: point its backend at the 1Password SSH agent so it
-# forwards your op keys into containers. Not needed on OrbStack. See docs/ssh.md.
-ssh-setup:
-    launchctl setenv SSH_AUTH_SOCK "$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
-    @echo "Set SSH_AUTH_SOCK for GUI apps. Restart Docker Desktop so its backend picks it up."
-
 # List configured agents.
 agents:
     uv run karakum agents

@@ -37,20 +37,13 @@ def _git_identity_args(agent: str) -> list[str]:
     return args
 
 
-def _is_docker_desktop() -> bool:
-    """True when the active Docker context is Docker Desktop (vs OrbStack / native)."""
-    result = subprocess.run(["docker", "context", "show"], capture_output=True, text=True)
-    return "desktop" in result.stdout.strip().lower()
-
-
 def _ssh_agent_args(provider: str) -> list[str]:
     """Return docker `-v`/`-e` args that forward a host SSH agent for in-container git.
 
     `provider` (`--ssh-agent`) selects which host agent to forward; see
-    `config.ssh_agent_socket`. Docker Desktop can't bind-mount a host socket, so it
-    forwards the agent through its host-services bridge — which proxies the host's
-    *default* agent (point that at the right agent with `just ssh-setup`). OrbStack
-    and native Linux bind-mount the resolved socket directly. See docs/ssh.md.
+    `config.ssh_agent_socket`. The resolved host socket is bind-mounted into the
+    container and `SSH_AUTH_SOCK` pointed at it — no private keys enter the image.
+    See docs/ssh.md.
     """
     if provider == "none":
         return []
@@ -59,8 +52,7 @@ def _ssh_agent_args(provider: str) -> list[str]:
         print(f"karakum: WARNING — no SSH agent socket for provider '{provider}'; in-container git over SSH disabled.", file=sys.stderr)
         return []
     preflight.check_ssh_agent(socket)
-    src = "/run/host-services/ssh-auth.sock" if _is_docker_desktop() else socket
-    return ["-v", f"{src}:/ssh-agent.sock", "-e", "SSH_AUTH_SOCK=/ssh-agent.sock"]
+    return ["-v", f"{socket}:/ssh-agent.sock", "-e", "SSH_AUTH_SOCK=/ssh-agent.sock"]
 
 
 @click.group()

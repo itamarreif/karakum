@@ -31,7 +31,7 @@ def check_ssh_agent(socket: str) -> None:
     if result.returncode == 1:
         print(f"karakum: WARNING — SSH agent at {socket} has no keys loaded.", file=sys.stderr)
         print("        in-container git over SSH will fail with 'Permission denied'.", file=sys.stderr)
-        print("        load one (`ssh-add <key>`), or for 1Password enable its agent + run `just ssh-setup`.", file=sys.stderr)
+        print("        load one (`ssh-add <key>`), or for 1Password enable its agent. See docs/ssh.md.", file=sys.stderr)
     else:
         print(f"karakum: WARNING — can't reach SSH agent at {socket}: {result.stderr.strip()}", file=sys.stderr)
         print("        in-container git over SSH may fail. See docs/ssh.md.", file=sys.stderr)
