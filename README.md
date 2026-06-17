@@ -87,6 +87,8 @@ Container paths mirror host paths so absolute paths stay valid across the bounda
 
 The agent sees **only** its memory clone and (if specified) project clone — nothing else from the broader filesystem. Crucially, the **host repos' `.git` directories are never mounted**: each session is a standalone clone, so the agent cannot read or rewrite the host's branches, refs, config, or hooks. Both source repos must be git repos with `origin` remotes matching the manifest's `repository` field; the launcher fails loudly otherwise, and repoints each clone's `origin` at that remote so the agent pushes to GitHub.
 
+`git push`/`pull` authenticate over SSH using the **host's SSH agent**, forwarded into the container — Docker Desktop exposes it at `/run/host-services/ssh-auth.sock`, which compose bind-mounts and points `SSH_AUTH_SOCK` at. The image installs `openssh-client` and pins GitHub's host key; **no private keys are ever copied in**, only the agent socket is forwarded. Author/committer identity is independently set to the agent (`GIT_AUTHOR_*`/`GIT_COMMITTER_*`), so commits are attributed to the agent while the push is signed by the host key.
+
 ## Secrets
 
 Secrets are declared **host-wide** in `secrets.yaml` as URI references, shared across all agents and toolchains. The launcher resolves each at session start via the registered provider and injects them as env vars (`-e VAR`, name only — the value never touches the command line) into the container.
@@ -114,4 +116,4 @@ No service in karakum ever publishes ports to the host. When the first listener 
 
 ## Pending
 
-See followups in `~/code/ai/.agents/scratchpad/issues/14-containerization-mvp.md`: tier-1 hardening, egress proxy, per-capability tool services, SSH agent socket forwarding, isolation upgrades.
+See followups in `~/code/ai/.agents/scratchpad/issues/14-containerization-mvp.md`: tier-1 hardening, egress proxy, per-capability tool services, isolation upgrades.

@@ -13,8 +13,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       gnupg \
       jq \
       less \
+      openssh-client \
       ripgrep \
     && rm -rf /var/lib/apt/lists/*
+
+# Pin GitHub's host key so SSH (via the forwarded host agent) authenticates
+# non-interactively — without this, the first connection's known-hosts prompt
+# would hang a non-interactive session.
+RUN mkdir -p /etc/ssh \
+    && ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> /etc/ssh/ssh_known_hosts
 
 # GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
