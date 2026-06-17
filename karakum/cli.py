@@ -40,23 +40,19 @@ def _git_identity_args(agent: str) -> list[str]:
 def _ssh_agent_args() -> list[str]:
     """Return docker `-v`/`-e` args that forward the host SSH agent for in-container git.
 
-    Forwards the host's *default* agent (`$SSH_AUTH_SOCK`) — no private keys enter the
-    image. On macOS, Docker Desktop and OrbStack both expose that agent inside the VM
-    at the fixed `/run/host-services/ssh-auth.sock` bridge (a host socket can't be
-    bind-mounted directly); on Linux the socket is bind-mounted directly. To use a
-    specific key set (e.g. 1Password's), make it your host default agent — the bridge
-    can't cherry-pick a non-default agent. See docs/ssh.md.
+    Forwards the host's *default* agent — no private keys enter the image. On macOS,
+    Docker Desktop and OrbStack both expose that agent inside the VM at the fixed
+    `/run/host-services/ssh-auth.sock` bridge (a host socket can't be bind-mounted
+    directly); on Linux `$SSH_AUTH_SOCK` is bind-mounted directly. To use a specific
+    key set (e.g. 1Password's), make it your host default agent — the bridge can't
+    cherry-pick a non-default agent. See docs/ssh.md.
     """
-    host_sock = os.environ.get("SSH_AUTH_SOCK")
-    if host_sock:
-        preflight.check_ssh_agent(host_sock)
-    elif sys.platform != "darwin":
-        print("karakum: WARNING — $SSH_AUTH_SOCK unset; in-container git over SSH disabled.", file=sys.stderr)
-        return []
+    if sys.platform == "darwin":
+        src = "/run/host-services/ssh-auth.sock"  # Docker Desktop / OrbStack bridge
     else:
-        print("karakum: WARNING — $SSH_AUTH_SOCK unset on host; in-container git over SSH may fail. See docs/ssh.md.", file=sys.stderr)
-    # macOS: the Docker Desktop / OrbStack bridge. Linux: the real host socket.
-    src = "/run/host-services/ssh-auth.sock" if sys.platform == "darwin" else host_sock
+        src = os.environ.get("SSH_AUTH_SOCK")
+        if not src:
+            return []
     return ["-v", f"{src}:/ssh-agent.sock", "-e", "SSH_AUTH_SOCK=/ssh-agent.sock"]
 
 

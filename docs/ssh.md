@@ -21,9 +21,9 @@ The bridge forwards the *default* agent only — it can't cherry-pick a specific
 So to use a particular key set (e.g. 1Password's), make that your default agent
 (below). Forwarding is automatic; there's no per-launch flag.
 
-A preflight runs `ssh-add -l` against your host agent and **warns** (doesn't block)
-if it holds no keys — the symptom otherwise is an in-container
-`Permission denied (publickey)` even when host `git` works.
+If your default agent holds no keys, the symptom is an in-container
+`Permission denied (publickey)` even when host `git` works — check `ssh-add -l` on
+the host (see Verify below).
 
 ## Using 1Password keys
 
