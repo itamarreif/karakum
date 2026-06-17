@@ -151,7 +151,7 @@ cli.launch(toolchain, agent, slug, project, cmd_args)
 │   docker_cmd = ["docker","compose","run","--rm","--name",...,
 │                 "-e KARAKUM_SESSION/AGENT/MEMORY", *project_args,
 │                 *_git_identity_args(agent),            # GIT_AUTHOR/COMMITTER → agent
-│                 *_ssh_agent_args(ssh_agent),           # forward host SSH agent (see docs/ssh.md)
+│                 *_ssh_agent_args(),                    # forward host SSH agent (see docs/ssh.md)
 │                 "-w", cwd, *secret_docker_args,
 │                 f"agent-{toolchain}", cmd, *extra_args]
 │

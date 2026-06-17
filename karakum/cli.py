@@ -37,22 +37,27 @@ def _git_identity_args(agent: str) -> list[str]:
     return args
 
 
-def _ssh_agent_args(provider: str) -> list[str]:
-    """Return docker `-v`/`-e` args that forward a host SSH agent for in-container git.
+def _ssh_agent_args() -> list[str]:
+    """Return docker `-v`/`-e` args that forward the host SSH agent for in-container git.
 
-    `provider` (`--ssh-agent`) selects which host agent to forward; see
-    `config.ssh_agent_socket`. The resolved host socket is bind-mounted into the
-    container and `SSH_AUTH_SOCK` pointed at it — no private keys enter the image.
-    See docs/ssh.md.
+    Forwards the host's *default* agent (`$SSH_AUTH_SOCK`) — no private keys enter the
+    image. On macOS, Docker Desktop and OrbStack both expose that agent inside the VM
+    at the fixed `/run/host-services/ssh-auth.sock` bridge (a host socket can't be
+    bind-mounted directly); on Linux the socket is bind-mounted directly. To use a
+    specific key set (e.g. 1Password's), make it your host default agent — the bridge
+    can't cherry-pick a non-default agent. See docs/ssh.md.
     """
-    if provider == "none":
+    host_sock = os.environ.get("SSH_AUTH_SOCK")
+    if host_sock:
+        preflight.check_ssh_agent(host_sock)
+    elif sys.platform != "darwin":
+        print("karakum: WARNING — $SSH_AUTH_SOCK unset; in-container git over SSH disabled.", file=sys.stderr)
         return []
-    socket = config.ssh_agent_socket(provider)
-    if not socket:
-        print(f"karakum: WARNING — no SSH agent socket for provider '{provider}'; in-container git over SSH disabled.", file=sys.stderr)
-        return []
-    preflight.check_ssh_agent(socket)
-    return ["-v", f"{socket}:/ssh-agent.sock", "-e", "SSH_AUTH_SOCK=/ssh-agent.sock"]
+    else:
+        print("karakum: WARNING — $SSH_AUTH_SOCK unset on host; in-container git over SSH may fail. See docs/ssh.md.", file=sys.stderr)
+    # macOS: the Docker Desktop / OrbStack bridge. Linux: the real host socket.
+    src = "/run/host-services/ssh-auth.sock" if sys.platform == "darwin" else host_sock
+    return ["-v", f"{src}:/ssh-agent.sock", "-e", "SSH_AUTH_SOCK=/ssh-agent.sock"]
 
 
 @click.group()
@@ -61,14 +66,12 @@ def main():
 
 
 @main.command("launch", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
-@click.option("--ssh-agent", "ssh_agent", default="system", type=click.Choice(config.SSH_AGENT_PROVIDERS),
-              help="Host SSH agent to forward for in-container git (system=$SSH_AUTH_SOCK; see docs/ssh.md).")
 @click.argument("toolchain")
 @click.argument("agent")
 @click.argument("slug")
 @click.argument("project", default="-")
 @click.argument("cmd_args", nargs=-1, type=click.UNPROCESSED)
-def launch(ssh_agent, toolchain, agent, slug, project, cmd_args):
+def launch(toolchain, agent, slug, project, cmd_args):
     """Launch an agent session in the given toolchain container."""
     if not cmd_args:
         raise click.UsageError("cmd is required")
@@ -146,7 +149,7 @@ def launch(ssh_agent, toolchain, agent, slug, project, cmd_args):
         "-e", f"KARAKUM_MEMORY={memory_session}",
         *project_args,
         *_git_identity_args(agent),
-        *_ssh_agent_args(ssh_agent),
+        *_ssh_agent_args(),
         "-w", cwd,
         *secret_docker_args,
         f"agent-{toolchain}",

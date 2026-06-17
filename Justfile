@@ -23,13 +23,13 @@ build:
 install:
     uv pip install -e .
 
-# Run Claude Code: just claude <agent> [<session>] [<project>] [<ssh_agent>]
-claude agent session="-" project="-" ssh_agent="system":
-    uv run karakum launch --ssh-agent={{ssh_agent}} claude {{agent}} {{session}} {{project}} claude
+# Run Claude Code: just claude <agent> [<session>] [<project>]
+claude agent session="-" project="-":
+    uv run karakum launch claude {{agent}} {{session}} {{project}} claude
 
-# Drop into bash: just shell <agent> [<session>] [<project>] [<ssh_agent>]
-shell agent session="-" project="-" ssh_agent="system":
-    uv run karakum launch --ssh-agent={{ssh_agent}} claude {{agent}} {{session}} {{project}} bash
+# Drop into bash: just shell <agent> [<session>] [<project>]
+shell agent session="-" project="-":
+    uv run karakum launch claude {{agent}} {{session}} {{project}} bash
 
 # List configured agents.
 agents:
