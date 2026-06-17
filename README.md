@@ -87,7 +87,65 @@ Container paths mirror host paths so absolute paths stay valid across the bounda
 
 The agent sees **only** its memory clone and (if specified) project clone — nothing else from the broader filesystem. Crucially, the **host repos' `.git` directories are never mounted**: each session is a standalone clone, so the agent cannot read or rewrite the host's branches, refs, config, or hooks. Both source repos must be git repos with `origin` remotes matching the manifest's `repository` field; the launcher fails loudly otherwise, and repoints each clone's `origin` at that remote so the agent pushes to GitHub.
 
-`git push`/`pull` authenticate over SSH using the **host's SSH agent**, forwarded into the container — Docker Desktop exposes it at `/run/host-services/ssh-auth.sock`, which compose bind-mounts and points `SSH_AUTH_SOCK` at. The image installs `openssh-client` and pins GitHub's host key; **no private keys are ever copied in**, only the agent socket is forwarded. Author/committer identity is independently set to the agent (`GIT_AUTHOR_*`/`GIT_COMMITTER_*`), so commits are attributed to the agent while the push is signed by the host key.
+## Git authentication (SSH agent forwarding)
+
+`git push`/`pull` inside the container authenticate over SSH using the **host's SSH agent**, forwarded in — **no private keys are ever copied into the image**, only the agent socket is exposed. The base image installs `openssh-client` and pins GitHub's host key (`ssh-keyscan`) so verification doesn't hang non-interactively. Author/committer identity is set independently to the agent (`GIT_AUTHOR_*`/`GIT_COMMITTER_*`), so commits are attributed to the agent while the push is signed by the host key.
+
+### How the forwarding works
+
+On **Docker Desktop**, the backend bridges the agent socket into the VM at the fixed path `/run/host-services/ssh-auth.sock`. Compose bind-mounts that path into the container and sets `SSH_AUTH_SOCK` to it (`docker-compose.yaml`). Crucially, that bridge forwards **whichever agent the host's `SSH_AUTH_SOCK` points to** — so the container only sees keys held by your host's *default* agent. You don't configure the socket inside karakum; you configure which agent is your host default.
+
+### Which agent: default vs 1Password
+
+The keys the container can use are exactly the keys returned by `ssh-add -l` **on the host**. Two common setups:
+
+- **System (default) agent** — keys added via `ssh-add ~/.ssh/<key>` (macOS: `ssh-add --apple-use-keychain ...`). `$SSH_AUTH_SOCK` already points here, so it works with the forwarding as-is. If `ssh-add -l` lists your GitHub key, you're done.
+- **1Password SSH agent** — keys live in 1Password and are served from its own socket. This is *not* the default `$SSH_AUTH_SOCK`; `ssh` reaches it via an `IdentityAgent` line in `~/.ssh/config`. That means host `git` works but `ssh-add -l` shows "no identities" and the container (which follows `$SSH_AUTH_SOCK`) gets an empty agent. To forward it, make the 1Password socket your **default** agent.
+
+> Why this matters: the symptom of a misconfigured agent is a confusing in-container `Permission denied (publickey)` even though host `git` works fine. Check `ssh-add -l` on the host first — if it's empty, the container will get nothing.
+
+### Using the 1Password agent
+
+1. Find its socket path (it's referenced as `IdentityAgent` in your SSH config):
+
+   ```bash
+   grep -i identityagent ~/.ssh/config ~/.ssh/config.*
+   # default location if unset:
+   #   ~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock
+   ```
+
+   (Enable it first under 1Password → Settings → Developer → **Use the SSH agent**.)
+
+2. Confirm it holds your key:
+
+   ```bash
+   SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock" ssh-add -l
+   ```
+
+3. Make it the default agent. Two places — your shell, and (because Docker Desktop is a GUI app that doesn't inherit your shell env) the launchd environment its backend reads:
+
+   ```bash
+   # shell (add to ~/.zshrc):
+   export SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
+
+   # GUI apps incl. Docker Desktop:
+   launchctl setenv SSH_AUTH_SOCK "$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
+   ```
+
+4. **Restart Docker Desktop** so its backend re-reads `SSH_AUTH_SOCK`.
+
+### Verify
+
+```bash
+ssh-add -l                       # host: lists your GitHub key
+just shell <agent> <slug> <project>
+# inside the container:
+ssh-add -l                       # SAME key appears
+ssh -T git@github.com            # "Hi <user>!"  (1Password prompts on the host per use)
+git pull
+```
+
+If the key lists on the host but not inside the container after a Docker Desktop restart, that's a runtime/agent-bridge quirk (e.g. OrbStack uses a different mechanism and may forward the agent automatically) — config-driven socket resolution per runtime is a planned follow-up.
 
 ## Secrets
 
