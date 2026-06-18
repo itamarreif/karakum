@@ -37,6 +37,25 @@ def _git_identity_args(agent: str) -> list[str]:
     return args
 
 
+def _ssh_agent_args() -> list[str]:
+    """Return docker `-v`/`-e` args that forward the host SSH agent for in-container git.
+
+    Forwards the host's *default* agent — no private keys enter the image. On macOS,
+    Docker Desktop and OrbStack both expose that agent inside the VM at the fixed
+    `/run/host-services/ssh-auth.sock` bridge (a host socket can't be bind-mounted
+    directly); on Linux `$SSH_AUTH_SOCK` is bind-mounted directly. To use a specific
+    key set (e.g. 1Password's), make it your host default agent — the bridge can't
+    cherry-pick a non-default agent. See docs/ssh.md.
+    """
+    if sys.platform == "darwin":
+        src = "/run/host-services/ssh-auth.sock"  # Docker Desktop / OrbStack bridge
+    else:
+        src = os.environ.get("SSH_AUTH_SOCK")
+        if not src:
+            return []
+    return ["-v", f"{src}:/ssh-agent.sock", "-e", "SSH_AUTH_SOCK=/ssh-agent.sock"]
+
+
 @click.group()
 def main():
     pass
@@ -126,6 +145,7 @@ def launch(toolchain, agent, slug, project, cmd_args):
         "-e", f"KARAKUM_MEMORY={memory_session}",
         *project_args,
         *_git_identity_args(agent),
+        *_ssh_agent_args(),
         "-w", cwd,
         *secret_docker_args,
         f"agent-{toolchain}",

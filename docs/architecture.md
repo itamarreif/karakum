@@ -150,6 +150,8 @@ cli.launch(toolchain, agent, slug, project, cmd_args)
 │   container_name = f"agent-{agent}-{slug_label}-{uuid4[:6]}"
 │   docker_cmd = ["docker","compose","run","--rm","--name",...,
 │                 "-e KARAKUM_SESSION/AGENT/MEMORY", *project_args,
+│                 *_git_identity_args(agent),            # GIT_AUTHOR/COMMITTER → agent
+│                 *_ssh_agent_args(),                    # forward host SSH agent (see docs/ssh.md)
 │                 "-w", cwd, *secret_docker_args,
 │                 f"agent-{toolchain}", cmd, *extra_args]
 │
@@ -161,9 +163,9 @@ cli.launch(toolchain, agent, slug, project, cmd_args)
 ## Module dependencies
 
 ```
-cli ─┬─► preflight ──► (subprocess: git, shutil: docker)
+cli ─┬─► preflight ──► (subprocess: git; shutil: docker)
      ├─► manifest  ──► (yaml, pathlib)
-     ├─► config    ──► manifest.expand_path ; (yaml)
+     ├─► config    ──► manifest.expand_path ; (yaml, os.environ)
      ├─► session   ──► config.sessions_root ; (subprocess: git)
      └─► secrets   ──► manifest.karakum_root ; (yaml; subprocess: op, os.environ)
 
