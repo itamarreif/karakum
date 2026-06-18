@@ -163,7 +163,7 @@ cli.launch(toolchain, agent, slug, project, cmd_args)
 ## Module dependencies
 
 ```
-cli ─┬─► preflight ──► (subprocess: git, ssh-add; shutil: docker, ssh-add)
+cli ─┬─► preflight ──► (subprocess: git; shutil: docker)
      ├─► manifest  ──► (yaml, pathlib)
      ├─► config    ──► manifest.expand_path ; (yaml, os.environ)
      ├─► session   ──► config.sessions_root ; (subprocess: git)
