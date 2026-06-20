@@ -1,9 +1,0 @@
-# Project manifest — codebase the agent acts on (workspace).
-# Schema:
-#   name        - identifier (matches the file basename)
-#   path        - local path to the project's git repo
-#   repository  - canonical remote; preflight verifies local origin matches
-
-name: karakum
-path: ~/code/ai/karakum
-repository: github.com/itamarreif/karakum

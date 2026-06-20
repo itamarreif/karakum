@@ -37,9 +37,13 @@ karakum/
                   launch / agents / projects / session (group: ls, rm).
                   `sessions` is an alias for `session ls`. Orchestrates
                   everything; ends `launch` by exec'ing `docker compose run`.
-  manifest.py     YAML manifest I/O. Locates agents/<n>.yaml &
-                  projects/<n>.yaml, loads them, dotted-key getter,
-                  ~ path expansion. Pure host-side, no side effects.
+  manifest.py     YAML manifest I/O + location resolvers. karakum_root()
+                  (the checkout), config_dir() ($KARAKUM_CONFIG_DIR, default
+                  ~/.config/karakum), data_dir() ($KARAKUM_DATA_DIR, default
+                  ~/.karakum). Locates agents/<n>.yaml & projects/<n>.yaml
+                  under config_dir(), loads them, dotted-key getter, ~ path
+                  expansion. Pure host-side, no side effects. See
+                  docs/configuration.md for the full config model.
   preflight.py    Fail-fast guards: check_tools() (docker on PATH),
                   check_repo() (path is a git repo whose origin matches
                   the manifest). Raises SystemExit(2) on failure.
@@ -50,9 +54,11 @@ karakum/
                   Reuses an existing clone, but only if its .git is a real
                   directory (else fails loud). no_session_warning() for the
                   no-slug escape hatch.
-  config.py       Optional host settings from ~/.karakum/config.yaml (a
+  config.py       Optional host settings from <config_dir>/config.yaml (a
                   missing file or key falls back to defaults). sessions_root()
-                  → where session clones live (default ~/.karakum/sessions).
+                  / state_root() → where session clones / harness state live
+                  (default <data_dir>/sessions and <data_dir>/state, so
+                  $KARAKUM_DATA_DIR relocates both).
   cleanup.py      Session enumeration + remove. iter_sessions() scans
                   <sessions_root>/<agent>/<slug>/<label> (real-clone guard);
                   Clone is a frozen dataclass; clone_status() returns dirty +
@@ -60,7 +66,7 @@ karakum/
                   gh calls per repo; remove() rmtree's the session dir + reaps
                   exited agent-<agent>-<slug>-* containers.
   secrets.py      Pluggable secret resolution. load() reads the host-wide
-                  <repo>/secrets.yaml `.secrets` map, dispatches each URI by
+                  <config_dir>/secrets.yaml `.secrets` map, dispatches each URI by
                   scheme to a provider (op:// → 1Password, env:// → host env),
                   returns (env_dict, ["-e", VAR, ...]) for docker.
 pyproject.toml    setuptools build; deps click + pyyaml; `karakum`
@@ -96,7 +102,7 @@ karakum.cli:main            (click.Group)
 
 ```
 agents()  /  projects()
-   └─ manifest.karakum_root()
+   └─ manifest.config_dir() / "agents" | "projects"
    └─ for each *.yaml:
         manifest.load(path)         → manifest.require → yaml.safe_load
         manifest.get(data, "...")   → dotted-key traversal
@@ -141,7 +147,7 @@ cli.launch(toolchain, agent, slug, project, cmd_args)
 │      else:
 │        ├─ memory_session = ksession.ensure(memory_path, agent, slug, "agent", memory_repo)
 │        │     ├─ session = config.sessions_root()/<agent>/<slug>/scratchpad
-│        │     │            (default root ~/.karakum/sessions; ~/.karakum/config.yaml override)
+│        │     │            (default root <data_dir>/sessions; config.yaml `sessions_root` override)
 │        │     ├─ if it exists: reuse it — but only if <session>/.git is a real
 │        │     │            directory (a karakum clone), else SystemExit(2)
 │        │     ├─ git -C <repo> remote get-url origin          (capture GitHub URL)
@@ -161,7 +167,7 @@ cli.launch(toolchain, agent, slug, project, cmd_args)
 │       cwd = project_session                        # else cwd = memory_session
 │
 ├─4 SECRETS
-│   ├─ ksecrets.load()                        # reads host-wide <repo>/secrets.yaml
+│   ├─ ksecrets.load()                        # reads host-wide <config_dir>/secrets.yaml
 │   │     └─ for var,ref in secrets.yaml .secrets:
 │   │           scheme = ref.split("://")[0]
 │   │           _PROVIDERS[scheme](ref):
@@ -189,17 +195,18 @@ cli.launch(toolchain, agent, slug, project, cmd_args)
 
 ```
 cli ─┬─► preflight ──► (subprocess: git; shutil: docker/gh)
-     ├─► manifest  ──► (yaml, pathlib)
-     ├─► config    ──► manifest.expand_path ; (yaml, os.environ)
+     ├─► manifest  ──► (yaml, pathlib, os.environ)   # karakum_root / config_dir / data_dir
+     ├─► config    ──► manifest.config_dir, .data_dir, .expand_path ; (yaml)
      ├─► session   ──► config.sessions_root ; (subprocess: git)
      ├─► cleanup   ──► config.sessions_root ; (subprocess: git, gh, docker; ThreadPoolExecutor)
-     └─► secrets   ──► manifest.karakum_root ; (yaml; subprocess: op, os.environ)
+     └─► secrets   ──► manifest.config_dir ; (yaml; subprocess: op, os.environ)
 
-(cli is the only orchestrator; the shared helpers are manifest and config —
- session resolves clone roots via config.sessions_root(); cleanup enumerates
- the same tree; secrets reads
- <repo>/secrets.yaml via manifest.karakum_root(); config reads the optional
- ~/.karakum/config.yaml)
+(cli is the only orchestrator; the shared helper is manifest — it owns the three
+ location resolvers. session resolves clone roots via config.sessions_root();
+ cleanup enumerates the same tree; secrets reads <config_dir>/secrets.yaml via
+ manifest.config_dir(); config reads the optional <config_dir>/config.yaml and
+ derives session/state roots from manifest.data_dir(). config imports from
+ manifest, not the reverse — no cycle.)
 ```
 
 ## Design notes
@@ -217,9 +224,10 @@ cli ─┬─► preflight ──► (subprocess: git; shutil: docker/gh)
   `--name`). Compose stays agent/project-agnostic.
 
 - **Three orthogonal axes → three inputs.** toolchain (`agent-<toolchain>`
-  service/image) · agent (`agents/<n>.yaml` → memory) · project
-  (`projects/<n>.yaml`, optional). Secrets are host-wide (`secrets.yaml`), not an
-  axis. `cli.launch` is where the three combine.
+  service/image) · agent (`<config_dir>/agents/<n>.yaml` → memory) · project
+  (`<config_dir>/projects/<n>.yaml`, optional). Secrets are host-wide
+  (`<config_dir>/secrets.yaml`), not an axis. `cli.launch` is where the three
+  combine.
 
 - **Fail-loud preflight before side effects.** `check_tools` and `check_repo`
   run *before* any clone or secret resolution, so a bad manifest or missing
@@ -240,8 +248,9 @@ cli ─┬─► preflight ──► (subprocess: git; shutil: docker/gh)
   the project name), so every repo a session touches sits together and outside the
   source repos (no collision with a manual `git worktree add`). The **slug alone**
   is the stable identity (no date) — re-running the same slug, even days later,
-  reuses the same clone and branch. `sessions_root` defaults to `~/.karakum/sessions`,
-  overridable in `~/.karakum/config.yaml` (`config.py`).
+  reuses the same clone and branch. `sessions_root` defaults to
+  `<data_dir>/sessions` (`$KARAKUM_DATA_DIR`, default `~/.karakum`), overridable
+  via the `sessions_root` key in `<config_dir>/config.yaml` (`config.py`).
 
 - **Cleanup is git-derived, not metadata-driven.** `session rm` derives state
   from *live* git + `gh` (working tree, `rev-list` vs `origin`, PR status) rather

@@ -1,0 +1,22 @@
+# An agent — a persistent identity whose "memory" is a git repo (skills,
+# scratchpad, master prompt). Copy this to <config-dir>/agents/<name>.yaml and
+# edit, where <config-dir> is $KARAKUM_CONFIG_DIR (default ~/.config/karakum).
+#
+# An agent is decoupled from:
+#   - the toolchain (selected at invocation: `just claude <agent> <slug>` runs on claude)
+#   - the project it works on (passed at invocation: `just claude <agent> <slug> <project>`)
+#
+# Memory = the agent's persistent self (skills, scratchpad, master prompt).
+# Project (optional, per-session) = the codebase the agent acts on.
+#
+# Schema (MVP):
+#   name              - identifier; used in branch names (<name>/<slug>) and container name
+#   memory.path       - local path to the agent's memory git repo
+#   memory.repository - canonical remote; preflight verifies local origin matches
+#
+# Secrets are host-wide, not per-agent — see ../secrets.yaml.
+
+name: example
+memory:
+  path: ~/code/you/your-memory-repo
+  repository: github.com/you/your-memory-repo

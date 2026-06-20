@@ -9,8 +9,8 @@ Container infra for AI agents.
 karakum decouples:
 
 1. **Toolchain** (which container image runs) — `containers/<toolchain>/`. Selected at invocation.
-2. **Agent** (identity: memory) — `agents/<name>.yaml`. Decoupled from toolchain and project.
-3. **Project** (workspace the agent acts on) — `projects/<name>.yaml`. Optional per session.
+2. **Agent** (identity: memory) — `<config-dir>/agents/<name>.yaml`. Decoupled from toolchain and project.
+3. **Project** (workspace the agent acts on) — `<config-dir>/projects/<name>.yaml`. Optional per session.
 
 ```
 just <toolchain> <agent> [<session-slug>] [<project>]
@@ -19,18 +19,47 @@ just claude takwin organize-notes              # toolchain=claude, agent=takwin,
 just claude takwin                             # no slug → runs on main branch (with disclaimer)
 ```
 
-## Layout
+## Three locations
+
+karakum splits its files across three locations, by lifecycle. Full model in
+[docs/configuration.md](docs/configuration.md).
+
+```
+# REPO (this checkout) — version-controlled, generic, shareable
+karakum/  containers/  docker-compose.yaml  scripts/  Justfile
+toolchains.yaml          Default toolchain versions (overridable per-host).
+examples/                Genericized sample config to copy into the config dir.
+
+# CONFIG ($KARAKUM_CONFIG_DIR, default ~/.config/karakum) — your settings, dotfiles-friendly
+config.yaml              Global settings (sessions_root, state_root, cleanup).
+toolchains.yaml          Optional per-host override of the repo default.
+agents/<name>.yaml       Agent identity: name + memory repo path + remote.
+projects/<name>.yaml     Workspace repos (path + repository).
+secrets.yaml             Host-wide secret references (op://…, env://…), never values.
+
+# DATA ($KARAKUM_DATA_DIR, default ~/.karakum) — large, regenerable, NOT in dotfiles
+sessions/<agent>/<slug>/<label>/   Isolated git clones, one tree per session.
+state/<agent>/                     Persistent ~/.claude per agent (auth/trust/caches).
+```
+
+The split lets the repo be shared: nothing machine-specific (local paths,
+1Password coordinates) is committed, and nothing large or auth-bearing lands in
+version control. Within the data dir, `config.yaml` can redirect `sessions_root` /
+`state_root` individually; precedence per subtree is
+**env var (`$KARAKUM_DATA_DIR`) > `config.yaml` key > built-in default**.
+
+### Repo layout
 
 ```
 karakum/
   containers/<toolchain>/   Docker images. Toolchain-specific.
-  agents/<name>.yaml        Agent identity: name + memory.
-  projects/<name>.yaml      Workspace repos (path + repository).
-  secrets.yaml              Host-wide secret references (op://…), shared by all agents.
+  examples/                 Sample agents/, projects/, secrets.yaml — copy into config dir.
+  toolchains.yaml           Default toolchain versions.
   Justfile                  Host entry point — thin recipes dispatching to the CLI.
   karakum/                  Python CLI package (install with `just install`).
     cli.py                  Click entry point: launch, agents, projects, session group.
-    manifest.py             YAML manifest loading.
+    manifest.py             YAML manifest loading + location resolvers.
+    config.py               Optional host settings (config.yaml) + session/state roots.
     preflight.py            Docker + git repo checks.
     secrets.py              Secret resolution (op://, env://).
     session.py              Per-session isolated clone lifecycle.
@@ -38,10 +67,12 @@ karakum/
   scripts/build.sh          Docker image build script.
   docker-compose.yaml       One service per toolchain.
   docs/architecture.md      CLI structure + per-command call graphs.
+  docs/configuration.md     The three-location config model.
   pyproject.toml            Python package definition.
 ```
 
-Adding a new agent / project / toolchain is a one-file change. The three are independent.
+Adding a new agent / project / toolchain is a one-file change in the config dir.
+The three are independent.
 
 For how the CLI is wired together — modules, command dispatch, and the `launch` call graph — see [docs/architecture.md](docs/architecture.md).
 
@@ -53,20 +84,53 @@ For how the CLI is wired together — modules, command dispatch, and the `launch
 - `op` (`brew install 1password-cli`) — only if any agent manifest uses `op://` secrets.
 - `gh` (`brew install gh`) — only for `just sessions` pr-state column (it queries GitHub for PR status).
 
+## First-run setup
+
+karakum reads your agents, projects, and secret references from the **config dir**
+(`$KARAKUM_CONFIG_DIR`, default `~/.config/karakum`). Seed it from the genericized
+samples in `examples/`, then edit:
+
+```sh
+mkdir -p ~/.config/karakum
+cp -r examples/agents examples/projects examples/secrets.yaml ~/.config/karakum/
+# then edit:
+#   ~/.config/karakum/agents/*.yaml    → your memory repo path + remote
+#   ~/.config/karakum/projects/*.yaml  → your project repo paths + remotes
+#   ~/.config/karakum/secrets.yaml     → your secret references
+```
+
+The sample `secrets.yaml` uses `env://VAR` references (portable — reads a host env
+var) so first run works without extra tooling. Switch any reference to
+`op://Vault/Item/field` to pull from 1Password instead (requires the `op` CLI).
+
+Override the default locations with env vars (e.g. in your shell profile):
+
+```sh
+export KARAKUM_CONFIG_DIR=~/dotfiles/karakum   # point config at your dotfiles
+export KARAKUM_DATA_DIR=~/.karakum             # (default) session clones + harness state
+```
+
 ## Quick start
 
 ```sh
 just install                                         # install the karakum CLI (once, or after edits)
+# or, to put `karakum` on PATH while keeping the repo as the home of the code:
+uv tool install --editable .                         # editable install — still imports from this checkout
 just build                                           # build base + claude images (~5-10 min)
-claude setup-token                                   # one-time (host): make an OAuth token → store in 1Password → reference as CLAUDE_CODE_OAUTH_TOKEN in secrets.yaml
+claude setup-token                                   # one-time (host): make an OAuth token → reference as CLAUDE_CODE_OAUTH_TOKEN in secrets.yaml
 just claude takwin <slug>                            # memory-only session (note-taking, organizing, etc.)
 just claude takwin <slug> <project>                  # session that also has <project> mounted RW
 just claude takwin                                   # no slug: run on main branch (shows disclaimer)
 ```
 
+`uv tool install --editable .` keeps the installed `karakum` importing from this
+checkout, so `karakum_root()` still resolves to the repo where
+`docker-compose.yaml` and `containers/` live — `just build` and Dockerfile edits
+keep working. Recommended for a personal, single-machine install.
+
 `<slug>` names what the session is about. The launcher creates (or reuses) an **isolated clone** at `<sessions_root>/<agent>/<slug>/<label>` on branch `<agent>/<slug>` for **both** the memory repo (`label` = `scratchpad`) and the project repo (`label` = the project name), if specified. Grouping by session keeps every repo a session touches together, and living outside the repos means it never collides with a manual `git worktree add`. Each clone is fully independent (its own `.git`, no shared objects), so the agent can never touch the host repo's git database; its `origin` points at GitHub, so commits reach the host via push + pull/PR, not a shared `.git`. The slug is the stable session identity — resuming the same slug (even on a later day) reuses the same clone and branch. Omitting the slug skips cloning and mounts the live main branch directly — a warning is printed since changes affect the repo immediately.
 
-> `<sessions_root>` defaults to `~/.karakum/sessions`. Override it by setting `sessions_root` in `~/.karakum/config.yaml`. Because clones live there (not inside the repos), no per-repo `.gitignore` entry is needed.
+> `<sessions_root>` defaults to `<data_dir>/sessions` (`$KARAKUM_DATA_DIR`, default `~/.karakum`). Override it by setting `sessions_root` in `<config-dir>/config.yaml`, or relocate the whole data dir with `$KARAKUM_DATA_DIR`. Because clones live there (not inside the repos), no per-repo `.gitignore` entry is needed.
 
 Multiple terminals can open the **same slug** concurrently; each gets a unique container name so Docker doesn't conflict.
 
@@ -109,7 +173,7 @@ Container paths mirror host paths so absolute paths stay valid across the bounda
 - **Memory session clone** at `<sessions_root>/<agent>/<slug>/scratchpad/` mounted **RW** at the same path inside.
 - **Project session clone** (if a project is specified) at `<sessions_root>/<agent>/<slug>/<project>/` mounted **RW** at the same path inside.
 - **CWD** inside the container = the project clone if specified, else the memory clone.
-- **`~/.claude/`** inside the container is bind-mounted from a per-agent host dir `<state_root>/<agent>` (default `~/.karakum/state`), so settings/trust/history persist across runs and the dir stays host-owned (agent-writable, inspectable).
+- **`~/.claude/`** inside the container is bind-mounted from a per-agent host dir `<state_root>/<agent>` (default `<data_dir>/state`, i.e. `~/.karakum/state`), so settings/trust/history persist across runs and the dir stays host-owned (agent-writable, inspectable).
 - **Env vars**: `KARAKUM_MEMORY`, `KARAKUM_PROJECT` (when set), `KARAKUM_SESSION`, `KARAKUM_AGENT`.
 
 The agent sees **only** its memory clone and (if specified) project clone — nothing else from the broader filesystem. Crucially, the **host repos' `.git` directories are never mounted**: each session is a standalone clone, so the agent cannot read or rewrite the host's branches, refs, config, or hooks. Both source repos must be git repos with `origin` remotes matching the manifest's `repository` field; the launcher fails loudly otherwise, and repoints each clone's `origin` at that remote so the agent pushes to GitHub.
@@ -120,13 +184,13 @@ In-container `git push`/`pull` authenticate over SSH via your **forwarded host S
 
 ## Secrets
 
-Secrets are declared **host-wide** in `secrets.yaml` as URI references, shared across all agents and toolchains. The launcher resolves each at session start via the registered provider and injects them as env vars (`-e VAR`, name only — the value never touches the command line) into the container.
+Secrets are declared **host-wide** in `<config-dir>/secrets.yaml` as URI references, shared across all agents and toolchains. The launcher resolves each at session start via the registered provider and injects them as env vars (`-e VAR`, name only — the value never touches the command line) into the container.
 
 ```yaml
-# secrets.yaml
+# <config-dir>/secrets.yaml
 secrets:
-  GH_TOKEN: op://Personal/karakum gh pat/token   # 1Password (default)
-  ANTHROPIC_API_KEY: env://ANTHROPIC_API_KEY      # passthrough from host shell env
+  GH_TOKEN: env://GH_TOKEN                        # passthrough from host shell env (portable)
+  CLAUDE_CODE_OAUTH_TOKEN: op://Personal/karakum claude code oauth token/credential  # 1Password
 ```
 
 Claude Code authenticates from `CLAUDE_CODE_OAUTH_TOKEN` (above) — interactive `/login` doesn't work reliably in the container. The launcher also seeds `hasCompletedOnboarding` in the per-agent `~/.claude` state dir so claude skips the first-run wizard and starts straight in; settings, trusted folders, and history then persist in that host dir across runs.
