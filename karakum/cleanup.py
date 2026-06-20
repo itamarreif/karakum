@@ -112,7 +112,7 @@ def pr_state(clone: Clone) -> str:
     result = subprocess.run(
         ["gh", "pr", "list", "--head", clone.branch, "--state", "all",
          "--json", "number,state",
-         "--jq", '.[0] | if . == null then "no pr" elif .state == "OPEN" then "#\(.number)" else (.state | ascii_downcase) end'],
+         "--jq", r'.[0] | if . == null then "no pr" elif .state == "OPEN" then "#\(.number)" else (.state | ascii_downcase) end'],
         capture_output=True, text=True, cwd=str(clone.path),
     )
     if result.returncode != 0:
