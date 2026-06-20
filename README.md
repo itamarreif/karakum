@@ -1,6 +1,8 @@
+![Darvaza gas crater](https://images.squarespace-cdn.com/content/v1/590dd4905016e187a50516d7/1565763159832-7E51CX2CI87SNL8NCFC7/View+of+Darvaza+Gas+Crater+at+Night?format=2500w)
+
 # karakum
 
-Container infra for AI agents. Child of scratchpad issue #10; MVP per #14.
+Container infra for AI agents.
 
 ## Three orthogonal axes
 
