@@ -196,6 +196,7 @@ def sessions(agent):
         print(f"karakum: no sessions{where} under {config.sessions_root()}", file=sys.stderr)
         return
     have_gh = bool(shutil.which("gh"))
+    rows = []
     for s in found:
         for c in s.clones:
             branch = c.branch
@@ -205,7 +206,10 @@ def sessions(agent):
             if ahead:
                 branch += f"↑{ahead}"
             pr = cleanup.pr_state(c) if have_gh else "?"
-            print(f"{s.agent}\t{c.label}\t{pr}\t{s.slug}\t{branch}")
+            rows.append((s.agent, c.label, pr, s.slug, branch))
+    widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]
+    for row in rows:
+        print("  ".join(cell.ljust(widths[i]) for i, cell in enumerate(row)).rstrip())
 
 
 @main.command("clean")
