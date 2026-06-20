@@ -41,7 +41,7 @@ projects:
 
 # List session clones + status: just sessions [<agent>]
 sessions agent="":
-    uv run karakum sessions {{agent}}
+    uv run karakum sessions {{agent}} | column -t
 
 # Remove session clones (default: PR merged): just clean [<agent>] [<slug>] [<flags>]
 clean agent="" slug="" *flags:
