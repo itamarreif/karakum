@@ -41,8 +41,12 @@ projects:
 
 # List session clones + status: just sessions [<agent>]
 sessions agent="":
-    uv run karakum sessions {{agent}} | column -t
+    uv run karakum session ls {{agent}} | column -t
 
-# Remove session clones (default: PR merged): just clean [<agent>] [<slug>] [<flags>]
-clean agent="" slug="" *flags:
-    uv run karakum clean {{agent}} {{slug}} {{flags}}
+# List session clones + status: just session-ls [<agent>]
+session-ls agent="":
+    uv run karakum session ls {{agent}} | column -t
+
+# Remove a session directory: just session-rm <slug> [--dry-run] [--yes]
+session-rm slug *flags:
+    uv run karakum session rm {{slug}} {{flags}}

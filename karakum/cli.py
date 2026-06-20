@@ -182,9 +182,19 @@ def projects():
         print(f"{name}\t{proj_path}\t{repo}")
 
 
-@main.command("sessions")
+# ---------------------------------------------------------------------------
+# session command group
+# ---------------------------------------------------------------------------
+
+@main.group("session")
+def session_group():
+    """Manage session clones."""
+    pass
+
+
+@session_group.command("ls")
 @click.argument("agent", required=False)
-def sessions(agent):
+def session_ls(agent):
     """List session clones and their status (one row per clone).
 
     Columns: agent  label  pr-state  slug  branch
@@ -208,58 +218,39 @@ def sessions(agent):
             print(f"{s.agent}\t{c.label}\t{pr}\t{s.slug}\t{branch}")
 
 
-@main.command("clean")
-@click.argument("agent", required=False)
-@click.argument("slug", required=False)
+@session_group.command("rm")
+@click.argument("slug")
 @click.option("--dry-run", is_flag=True, help="Show what would be removed; delete nothing.")
-@click.option("--force", is_flag=True, help="Bypass the safe-delete predicate (requires agent+slug).")
 @click.option("--yes", is_flag=True, help="Skip the confirmation prompt.")
-def clean(agent, slug, dry_run, force, yes):
-    """Remove session clones whose safe-delete predicate holds.
+def session_rm(slug, dry_run, yes):
+    """Delete a session directory and reap its containers."""
+    all_sessions = cleanup.iter_sessions()
+    matches = [s for s in all_sessions if s.slug == slug]
 
-    With no args, sweeps every safe session; pass AGENT (and optionally SLUG) to
-    scope. The predicate is read from ~/.karakum/config.yaml (cleanup.predicate,
-    default 'merged'). --force deletes a named session regardless of predicate.
-    """
-    if force and not (agent and slug):
-        raise click.UsageError("--force requires an explicit AGENT and SLUG")
+    if not matches:
+        raise click.ClickException(f"no session with slug '{slug}'")
 
-    candidates = cleanup.iter_sessions(agent)
-    if slug is not None:
-        candidates = [s for s in candidates if s.slug == slug]
-    if not candidates:
-        print("karakum: no matching sessions", file=sys.stderr)
-        return
+    if len(matches) > 1:
+        lines = "\n".join(f"  {s.agent}/{s.slug}  {s.path}" for s in matches)
+        raise click.ClickException(
+            f"slug '{slug}' matches sessions under multiple agents:\n{lines}\n"
+            f"Use 'karakum session ls' to review, then remove the specific clone directory manually."
+        )
 
-    predicate = config.cleanup_predicate()
-    if not force and predicate == "merged":
-        preflight.check_gh()
+    session = matches[0]
+    target = f"{session.agent}/{session.slug}  ({session.path})"
 
-    to_remove: list = []
-    for s in candidates:
-        if force:
-            to_remove.append((s, "forced"))
-            continue
-        safe, reason = cleanup.session_safe(s, predicate)
-        if safe:
-            to_remove.append((s, reason))
-        else:
-            print(f"skip   {s.agent}/{s.slug}\t({reason})")
-
-    if not to_remove:
-        print("karakum: nothing safe to remove", file=sys.stderr)
-        return
-
-    verb = "would remove" if dry_run else "remove"
-    for s, reason in to_remove:
-        print(f"{verb} {s.agent}/{s.slug}\t({reason})\t{s.path}")
     if dry_run:
+        print(f"would remove {target}")
         return
 
-    if not yes and not click.confirm(f"Delete {len(to_remove)} session(s)?"):
+    if not yes and not click.confirm(f"Remove {target}?"):
         print("karakum: aborted", file=sys.stderr)
         return
 
-    for s, _ in to_remove:
-        cleanup.remove(s)
-        print(f"removed {s.agent}/{s.slug}")
+    cleanup.remove(session)
+    print(f"removed {session.agent}/{session.slug}")
+
+
+# backward-compat alias: `karakum sessions` still works
+main.add_command(session_ls, name="sessions")
