@@ -12,11 +12,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       git \
       gnupg \
       jq \
-      just \
       less \
       openssh-client \
       ripgrep \
     && rm -rf /var/lib/apt/lists/*
+
+# just is not in Debian repos — install via official script
+RUN curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
 
 # Pin GitHub's host key so SSH (via the forwarded host agent) authenticates
 # non-interactively — without this, the first connection's known-hosts prompt
