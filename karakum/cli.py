@@ -187,7 +187,7 @@ def projects():
 def sessions(agent):
     """List session clones and their status (one row per clone).
 
-    Columns: agent  slug  label  branch  pr-state
+    Columns: agent  label  slug  branch  pr-state
     Branch is decorated: * = dirty, ↑N = N unpushed commits.
     """
     found = cleanup.iter_sessions(agent)
@@ -205,7 +205,7 @@ def sessions(agent):
             if ahead:
                 branch += f"↑{ahead}"
             pr = cleanup.pr_state(c) if have_gh else "?"
-            print(f"{s.agent}\t{s.slug}\t{c.label}\t{branch}\t{pr}")
+            print(f"{s.agent}\t{c.label}\t{s.slug}\t{branch}\t{pr}")
 
 
 @main.command("clean")
