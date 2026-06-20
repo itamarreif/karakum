@@ -187,7 +187,8 @@ def projects():
 def sessions(agent):
     """List session clones and their status (one row per clone).
 
-    Columns: agent  slug  label  branch  dirty?  unpushed  pr-state
+    Columns: agent  slug  label  branch  pr-state
+    Branch is decorated: * = dirty, ↑N = N unpushed commits.
     """
     found = cleanup.iter_sessions(agent)
     if not found:
@@ -197,10 +198,14 @@ def sessions(agent):
     have_gh = bool(shutil.which("gh"))
     for s in found:
         for c in s.clones:
-            dirty_flag = "dirty" if cleanup.dirty(c) else "clean"
+            branch = c.branch
+            if cleanup.dirty(c):
+                branch += "*"
             ahead = cleanup.unpushed(c)
+            if ahead:
+                branch += f"↑{ahead}"
             pr = cleanup.pr_state(c) if have_gh else "?"
-            print(f"{s.agent}\t{s.slug}\t{c.label}\t{c.branch}\t{dirty_flag}\t{ahead}\t{pr}")
+            print(f"{s.agent}\t{s.slug}\t{c.label}\t{branch}\t{pr}")
 
 
 @main.command("clean")

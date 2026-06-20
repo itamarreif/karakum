@@ -108,15 +108,16 @@ def pr_merged(clone: Clone) -> bool:
 
 
 def pr_state(clone: Clone) -> str:
-    """Human-readable PR state for listings: merged / open / none / unknown."""
+    """Human-readable PR state for listings: #N (open) / merged / none / unknown."""
     result = subprocess.run(
         ["gh", "pr", "list", "--head", clone.branch, "--state", "all",
-         "--json", "state", "--jq", ".[0].state // \"none\""],
+         "--json", "number,state",
+         "--jq", '.[0] | if . == null then "no pr" elif .state == "OPEN" then "#\(.number)" else (.state | ascii_downcase) end'],
         capture_output=True, text=True, cwd=str(clone.path),
     )
     if result.returncode != 0:
         return "unknown"
-    return (result.stdout.strip() or "none").lower()
+    return result.stdout.strip() or "no pr"
 
 
 # --- safe-delete predicates -------------------------------------------------
