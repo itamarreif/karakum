@@ -22,8 +22,8 @@ just claude A [S] [P]     →  uv run karakum launch claude A S P claude
 just shell  A [S] [P]     →  uv run karakum launch claude A S P bash
 just agents              →  uv run karakum agents
 just projects            →  uv run karakum projects
-just sessions [A]        →  uv run karakum sessions A
-just clean [A] [S] [..]  →  uv run karakum clean A S ..
+just sessions [A]        →  uv run karakum session ls A    (alias: karakum sessions)
+just session-rm S [..]   →  uv run karakum session rm S ..
 just (default)           →  just --list
 ```
 
@@ -33,10 +33,10 @@ just (default)           →  just --list
 karakum/
   __init__.py     Empty — marks the package.
   __main__.py     `python -m karakum` shim: imports cli.main and calls it.
-  cli.py          The Click app. Defines `main` group + 5 commands:
-                  launch / agents / projects / sessions / clean.
-                  Orchestrates everything; ends `launch` by exec'ing
-                  `docker compose run`.
+  cli.py          The Click app. Defines `main` group + commands:
+                  launch / agents / projects / session (group: ls, rm).
+                  `sessions` is an alias for `session ls`. Orchestrates
+                  everything; ends `launch` by exec'ing `docker compose run`.
   manifest.py     YAML manifest I/O. Locates agents/<n>.yaml &
                   projects/<n>.yaml, loads them, dotted-key getter,
                   ~ path expansion. Pure host-side, no side effects.
@@ -52,13 +52,13 @@ karakum/
                   no-slug escape hatch.
   config.py       Optional host settings from ~/.karakum/config.yaml (a
                   missing file or key falls back to defaults). sessions_root()
-                  → where session clones live (default ~/.karakum/sessions);
-                  cleanup_predicate() → safe-delete rule (default "merged").
-  cleanup.py      Session enumeration + reaping. iter_sessions() scans
+                  → where session clones live (default ~/.karakum/sessions).
+  cleanup.py      Session enumeration + remove. iter_sessions() scans
                   <sessions_root>/<agent>/<slug>/<label> (real-clone guard);
-                  git/gh status helpers (dirty, unpushed, pr_merged); a
-                  predicate registry (merged | pushed); remove() rmtree's the
-                  session dir + reaps exited agent-<agent>-<slug>-* containers.
+                  Clone is a frozen dataclass; clone_status() returns dirty +
+                  unpushed via parallel ThreadPoolExecutor; pr_states() batches
+                  gh calls per repo; remove() rmtree's the session dir + reaps
+                  exited agent-<agent>-<slug>-* containers.
   secrets.py      Pluggable secret resolution. load() reads the host-wide
                   <repo>/secrets.yaml `.secrets` map, dispatches each URI by
                   scheme to a provider (op:// → 1Password, env:// → host env),
@@ -86,8 +86,10 @@ karakum.cli:main            (click.Group)
    ├── launch   ◄── just claude / just shell
    ├── agents   ◄── just agents
    ├── projects ◄── just projects
-   ├── sessions ◄── just sessions
-   └── clean    ◄── just clean
+   ├── sessions ◄── just sessions   (alias for session ls)
+   └── session  ◄── (group)
+         ├── ls ◄── just sessions
+         └── rm ◄── just session-rm
 ```
 
 `agents` / `projects` just glob the manifest dir and print a TSV:
@@ -101,18 +103,16 @@ agents()  /  projects()
       print(name \t path \t repo)
 ```
 
-`sessions` / `clean` operate on the session-clone tree via `cleanup`:
+`session ls` / `session rm` operate on the session-clone tree via `cleanup`:
 
 ```
-sessions(agent?)                          clean(agent?, slug?, --dry-run/--force/--yes)
-   └─ cleanup.iter_sessions(agent)           ├─ cleanup.iter_sessions(agent) (+ slug filter)
-   └─ per clone: dirty / unpushed /          ├─ predicate = config.cleanup_predicate()  # default "merged"
-        pr_state (gh)                         ├─ if predicate == "merged": preflight.check_gh()
-      print(agent slug label branch           ├─ per session: cleanup.session_safe(s, predicate)
-            dirty? unpushed pr-state)         │     (predicate holds for ALL clones)  | --force bypass
-                                              ├─ print plan; stop if --dry-run
-                                              └─ confirm (unless --yes) → cleanup.remove(s)
-                                                    (rmtree session dir + reap exited containers)
+session_ls(agent?)                        session_rm(slug, --dry-run, --yes)
+   └─ cleanup.iter_sessions(agent)           ├─ cleanup.iter_sessions() filter by slug
+   └─ clone_status() in parallel             ├─ error if slug matches multiple agents
+        (dirty, unpushed via ThreadPool)     ├─ print plan; stop if --dry-run
+   └─ pr_states() batched per repo (gh)      └─ confirm (unless --yes) → cleanup.remove(s)
+   └─ print(agent slug label branch                (rmtree session dir + reap exited containers)
+            pr-state)
 ```
 
 ## `launch` flow (the main path)
@@ -192,12 +192,12 @@ cli ─┬─► preflight ──► (subprocess: git; shutil: docker/gh)
      ├─► manifest  ──► (yaml, pathlib)
      ├─► config    ──► manifest.expand_path ; (yaml, os.environ)
      ├─► session   ──► config.sessions_root ; (subprocess: git)
-     ├─► cleanup   ──► config.sessions_root/cleanup_predicate ; (subprocess: git, gh, docker)
+     ├─► cleanup   ──► config.sessions_root ; (subprocess: git, gh, docker; ThreadPoolExecutor)
      └─► secrets   ──► manifest.karakum_root ; (yaml; subprocess: op, os.environ)
 
 (cli is the only orchestrator; the shared helpers are manifest and config —
  session resolves clone roots via config.sessions_root(); cleanup enumerates
- the same tree and reads config.cleanup_predicate(); secrets reads
+ the same tree; secrets reads
  <repo>/secrets.yaml via manifest.karakum_root(); config reads the optional
  ~/.karakum/config.yaml)
 ```
@@ -243,14 +243,12 @@ cli ─┬─► preflight ──► (subprocess: git; shutil: docker/gh)
   reuses the same clone and branch. `sessions_root` defaults to `~/.karakum/sessions`,
   overridable in `~/.karakum/config.yaml` (`config.py`).
 
-- **Cleanup is git-derived, not metadata-driven.** `clean` infers what's safe to
-  delete from *live* git + `gh` state (working tree, `rev-list` vs `origin`, merged
-  PRs) rather than a launch-time sidecar — so the launch path stays untouched and
-  there's no record to keep in sync. The safe-delete rule is a named predicate
-  (`merged` default, `pushed`) selected via `config.cleanup_predicate()`; adding a
-  predicate is one entry in `cleanup._PREDICATES`. A session (one `<agent>/<slug>`
-  dir spanning ≥1 label clones) is reapable only when the predicate holds for *every*
-  clone, so a session with an unpushed/unmerged project clone is never half-deleted.
+- **Cleanup is git-derived, not metadata-driven.** `session rm` derives state
+  from *live* git + `gh` (working tree, `rev-list` vs `origin`, PR status) rather
+  than a launch-time sidecar — so the launch path stays untouched and there's no
+  record to keep in sync. `session rm` is explicit with no predicate gate: naming
+  a slug deletes its directory unconditionally (after confirmation). `session ls`
+  shows current git/gh state so you can decide yourself.
 
 - **Secret hygiene boundary.** `secrets.load` returns values in `env_dict`
   (passed via the `env` arg to `execvpe`, never on the command line) and only
