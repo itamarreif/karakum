@@ -15,7 +15,7 @@ from pathlib import Path
 from karakum import config
 
 
-@dataclass
+@dataclass(frozen=True)
 class Clone:
     """One label clone inside a session (e.g. the `scratchpad` or project repo)."""
     label: str
