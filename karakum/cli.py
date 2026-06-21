@@ -200,21 +200,33 @@ def session_ls(agent):
     Columns: agent  label  slug  pr-state  branch
     Branch is decorated: * = dirty, ↑N = N unpushed commits.
     """
+    from concurrent.futures import ThreadPoolExecutor
+
     found = cleanup.iter_sessions(agent)
     if not found:
         where = f" for agent '{agent}'" if agent else ""
         print(f"karakum: no sessions{where} under {config.sessions_root()}", file=sys.stderr)
         return
+
+    all_clones = [c for s in found for c in s.clones]
     have_gh = bool(shutil.which("gh"))
+
+    # Fetch git status for all clones in parallel, and gh PR states in one call per repo.
+    with ThreadPoolExecutor() as pool:
+        git_futures = {pool.submit(cleanup.clone_status, c): c for c in all_clones}
+        pr_future = pool.submit(cleanup.pr_states, all_clones) if have_gh else None
+
+        git_results: dict[cleanup.Clone, tuple[bool, int]] = {}
+        for fut in git_futures:
+            git_results[git_futures[fut]] = fut.result()
+
+        pr_map: dict[str, str] = pr_future.result() if pr_future else {}
+
     for s in found:
         for c in s.clones:
-            branch = c.branch
-            if cleanup.dirty(c):
-                branch += "*"
-            ahead = cleanup.unpushed(c)
-            if ahead:
-                branch += f"↑{ahead}"
-            pr = cleanup.pr_state(c) if have_gh else "?"
+            is_dirty, ahead = git_results[c]
+            branch = c.branch + ("*" if is_dirty else "") + (f"↑{ahead}" if ahead else "")
+            pr = pr_map.get(c.branch, "no-pr") if have_gh else "?"
             print(f"{s.agent}\t{c.label}\t{s.slug}\t{pr}\t{branch}")
 
 

@@ -4,9 +4,11 @@ A *session* is `<sessions_root>/<agent>/<slug>/` and may hold several label
 clones (e.g. `scratchpad` + a project), each a full `git clone` on branch
 `<agent>/<slug>`.  Removal operates at the (agent, slug) granularity.
 """
+import json
 import shutil
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -82,17 +84,46 @@ def unpushed(clone: Clone) -> int:
     return int(out.stdout.strip()) if out.returncode == 0 and out.stdout.strip() else 0
 
 
-def pr_state(clone: Clone) -> str:
-    """Human-readable PR state for listings: #N (open) / merged / none / unknown."""
-    result = subprocess.run(
-        ["gh", "pr", "list", "--head", clone.branch, "--state", "all",
-         "--json", "number,state",
-         "--jq", r'.[0] | if . == null then "no-pr" elif .state == "OPEN" then "#\(.number)" else (.state | ascii_downcase) end'],
-        capture_output=True, text=True, cwd=str(clone.path),
-    )
-    if result.returncode != 0:
-        return "unknown"
-    return result.stdout.strip() or "no pr"
+def clone_status(clone: Clone) -> tuple[bool, int]:
+    """Return (dirty, unpushed) for a clone in parallel-safe fashion."""
+    return dirty(clone), unpushed(clone)
+
+
+def pr_states(clones: list[Clone]) -> dict[str, str]:
+    """Fetch PR states for all clones in one gh call per unique remote repo.
+
+    Returns a dict mapping clone.branch → state string (e.g. "#5", "merged", "no-pr").
+    Groups clones by origin URL so there's one API call per repo, not per clone.
+    """
+    # Group by origin remote URL
+    by_origin: dict[str, list[Clone]] = {}
+    for clone in clones:
+        r = subprocess.run(
+            ["git", "-C", str(clone.path), "remote", "get-url", "origin"],
+            capture_output=True, text=True,
+        )
+        url = r.stdout.strip() if r.returncode == 0 else ""
+        by_origin.setdefault(url, []).append(clone)
+
+    branch_to_state: dict[str, str] = {}
+    for url, repo_clones in by_origin.items():
+        if not url:
+            continue
+        result = subprocess.run(
+            ["gh", "pr", "list", "--state", "all",
+             "--json", "number,state,headRefName", "--limit", "200"],
+            capture_output=True, text=True, cwd=str(repo_clones[0].path),
+        )
+        if result.returncode != 0:
+            continue
+        for pr in json.loads(result.stdout or "[]"):
+            branch = pr["headRefName"]
+            if pr["state"] == "OPEN":
+                branch_to_state[branch] = f"#{pr['number']}"
+            else:
+                branch_to_state[branch] = pr["state"].lower()
+
+    return {clone.branch: branch_to_state.get(clone.branch, "no-pr") for clone in clones}
 
 
 def remove(session: Session) -> None:
