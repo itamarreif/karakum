@@ -212,7 +212,7 @@ def session_ls(agent):
     have_gh = bool(shutil.which("gh"))
 
     # Fetch git status for all clones in parallel, and gh PR states in one call per repo.
-    with ThreadPoolExecutor() as pool:
+    with ThreadPoolExecutor(max_workers=8) as pool:
         git_futures = {pool.submit(cleanup.clone_status, c): c for c in all_clones}
         pr_future = pool.submit(cleanup.pr_states, all_clones) if have_gh else None
 
