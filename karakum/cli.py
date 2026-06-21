@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import shutil
 import subprocess
 import sys
 import uuid
@@ -8,7 +9,7 @@ from pathlib import Path
 
 import click
 
-from karakum import config, manifest, preflight
+from karakum import cleanup, config, manifest, preflight
 from karakum import secrets as ksecrets
 from karakum import session as ksession
 
@@ -179,3 +180,89 @@ def projects():
         proj_path = manifest.get(data, "path") or ""
         repo = manifest.get(data, "repository") or ""
         print(f"{name}\t{proj_path}\t{repo}")
+
+
+# ---------------------------------------------------------------------------
+# session command group
+# ---------------------------------------------------------------------------
+
+@main.group("session")
+def session_group():
+    """Manage session clones."""
+    pass
+
+
+@session_group.command("ls")
+@click.argument("agent", required=False)
+def session_ls(agent):
+    """List session clones and their status (one row per clone).
+
+    Columns: agent  label  slug  pr-state  branch
+    Branch is decorated: * = dirty, ↑N = N unpushed commits.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    found = cleanup.iter_sessions(agent)
+    if not found:
+        where = f" for agent '{agent}'" if agent else ""
+        print(f"karakum: no sessions{where} under {config.sessions_root()}", file=sys.stderr)
+        return
+
+    all_clones = [c for s in found for c in s.clones]
+    have_gh = bool(shutil.which("gh"))
+
+    # Fetch git status for all clones in parallel, and gh PR states in one call per repo.
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        git_futures = {pool.submit(cleanup.clone_status, c): c for c in all_clones}
+        pr_future = pool.submit(cleanup.pr_states, all_clones) if have_gh else None
+
+        git_results: dict[cleanup.Clone, tuple[bool, int]] = {}
+        for fut in git_futures:
+            git_results[git_futures[fut]] = fut.result()
+
+        pr_map: dict[str, str] = pr_future.result() if pr_future else {}
+
+    for s in found:
+        for c in s.clones:
+            is_dirty, ahead = git_results[c]
+            branch = c.branch + ("*" if is_dirty else "") + (f"↑{ahead}" if ahead else "")
+            pr = pr_map.get(c.branch, "no-pr") if have_gh else "?"
+            print(f"{s.agent}\t{c.label}\t{s.slug}\t{pr}\t{branch}")
+
+
+@session_group.command("rm")
+@click.argument("slug")
+@click.option("--dry-run", is_flag=True, help="Show what would be removed; delete nothing.")
+@click.option("--yes", is_flag=True, help="Skip the confirmation prompt.")
+def session_rm(slug, dry_run, yes):
+    """Delete a session directory and reap its containers."""
+    all_sessions = cleanup.iter_sessions()
+    matches = [s for s in all_sessions if s.slug == slug]
+
+    if not matches:
+        raise click.ClickException(f"no session with slug '{slug}'")
+
+    if len(matches) > 1:
+        lines = "\n".join(f"  {s.agent}/{s.slug}  {s.path}" for s in matches)
+        raise click.ClickException(
+            f"slug '{slug}' matches sessions under multiple agents:\n{lines}\n"
+            f"Use 'karakum session ls' to review, then remove the specific clone directory manually."
+        )
+
+    session = matches[0]
+    target = f"{session.agent}/{session.slug}  ({session.path})"
+
+    if dry_run:
+        print(f"would remove {target}")
+        return
+
+    if not yes and not click.confirm(f"Remove {target}?"):
+        print("karakum: aborted", file=sys.stderr)
+        return
+
+    cleanup.remove(session)
+    print(f"removed {session.agent}/{session.slug}")
+
+
+# backward-compat alias: `karakum sessions` still works
+main.add_command(session_ls, name="sessions")

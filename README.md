@@ -29,11 +29,12 @@ karakum/
   secrets.yaml              Host-wide secret references (op://…), shared by all agents.
   Justfile                  Host entry point — thin recipes dispatching to the CLI.
   karakum/                  Python CLI package (install with `just install`).
-    cli.py                  Click entry point: launch, agents, projects.
+    cli.py                  Click entry point: launch, agents, projects, session group.
     manifest.py             YAML manifest loading.
     preflight.py            Docker + git repo checks.
     secrets.py              Secret resolution (op://, env://).
     session.py              Per-session isolated clone lifecycle.
+    cleanup.py              Session enumeration + remove logic.
   scripts/build.sh          Docker image build script.
   docker-compose.yaml       One service per toolchain.
   docs/architecture.md      CLI structure + per-command call graphs.
@@ -50,6 +51,7 @@ For how the CLI is wired together — modules, command dispatch, and the `launch
 - `uv` (`brew install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`).
 - `just` (`brew install just`).
 - `op` (`brew install 1password-cli`) — only if any agent manifest uses `op://` secrets.
+- `gh` (`brew install gh`) — only for `just sessions` pr-state column (it queries GitHub for PR status).
 
 ## Quick start
 
@@ -69,6 +71,29 @@ just claude takwin                                   # no slug: run on main bran
 Multiple terminals can open the **same slug** concurrently; each gets a unique container name so Docker doesn't conflict.
 
 `just` (no args) lists all recipes; `just agents` lists configured agents; `just projects` lists configured projects.
+
+### Listing & cleaning up sessions
+
+Session clones persist after the container exits, so they accumulate. Two commands manage them:
+
+```sh
+just sessions [<agent>]                  # list session clones + status (one row per clone)
+just session-rm <slug> [--dry-run] [--yes]  # delete a session directory
+```
+
+`just sessions` (alias: `karakum session ls`) prints one row per clone:
+
+```
+agent   slug    label    branch                  pr-state
+takwin  foo     agent    takwin/foo [#12 merged]  merged
+takwin  foo     project  takwin/foo [#12 merged]  merged
+```
+
+The branch column folds in dirty/unpushed state and PR number. The pr-state column queries GitHub via `gh`; omit `gh` and it shows `no-gh`.
+
+`just session-rm <slug>` (alias: `karakum session rm <slug>`) deletes the entire session directory and reaps any exited `agent-<agent>-<slug>-*` containers. If the slug matches clones under multiple agents it prints them and asks you to disambiguate.
+
+Flags: `--dry-run` (show what would be removed, delete nothing), `--yes` (skip the confirmation prompt).
 
 Invoke from anywhere with a shell alias:
 

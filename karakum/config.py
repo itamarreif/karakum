@@ -12,6 +12,7 @@ from karakum.manifest import expand_path
 CONFIG_PATH = Path("~/.karakum/config.yaml").expanduser()
 DEFAULT_SESSIONS_ROOT = "~/.karakum/sessions"
 DEFAULT_STATE_ROOT = "~/.karakum/state"
+DEFAULT_CLEANUP_PREDICATE = "merged"
 
 
 def _load() -> dict:
@@ -29,3 +30,13 @@ def sessions_root() -> Path:
 def state_root() -> Path:
     """Root under which per-agent harness state lives: `<root>/<agent>` → ~/.claude."""
     return expand_path(_load().get("state_root", DEFAULT_STATE_ROOT))
+
+
+def cleanup_predicate() -> str:
+    """Safe-delete predicate name for `karakum clean` (`cleanup.predicate`).
+
+    Default `merged` (a session is reapable once its branch's PR is merged on
+    GitHub). See `cleanup._PREDICATES` for the available names.
+    """
+    cleanup = _load().get("cleanup") or {}
+    return cleanup.get("predicate", DEFAULT_CLEANUP_PREDICATE)

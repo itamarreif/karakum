@@ -10,6 +10,12 @@ def check_tools() -> None:
         raise SystemExit(2)
 
 
+def check_gh() -> None:
+    if not shutil.which("gh"):
+        print("karakum: 'gh' not on PATH (install GitHub CLI: brew install gh)", file=sys.stderr)
+        raise SystemExit(2)
+
+
 def _canonicalize(repo: str) -> str:
     r = repo
     for prefix in ("https://", "http://", "git@"):

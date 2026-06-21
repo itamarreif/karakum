@@ -38,3 +38,11 @@ agents:
 # List configured projects.
 projects:
     uv run karakum projects
+
+# List session clones + status: just sessions [<agent>]
+sessions agent="":
+    uv run karakum session ls {{agent}} | column -t
+
+# Remove a session directory: just session-rm <slug> [--dry-run] [--yes]
+session-rm slug *flags:
+    uv run karakum session rm {{slug}} {{flags}}

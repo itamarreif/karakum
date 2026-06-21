@@ -24,11 +24,12 @@ karakum/
   secrets.yaml              Host-wide secret references (op://…), shared by all agents.
   Justfile                  Host entry point: thin recipes dispatching to the CLI.
   karakum/                  Python CLI package (uv pip install -e . or uv run karakum).
-    cli.py                  Entry point: launch, agents, projects subcommands.
+    cli.py                  Entry point: launch, agents, projects, session group (ls / rm).
     manifest.py             YAML manifest loading.
-    preflight.py            Docker + git repo checks.
+    preflight.py            Docker + git + gh checks.
     secrets.py              Secret resolution (op://, env://); pluggable providers.
     session.py              Per-session isolated clone lifecycle.
+    cleanup.py              Session listing (iter_sessions, pr_states) + remove.
   scripts/build.sh          Docker image build (standalone; no Python dependency).
   docker-compose.yaml       One service per toolchain.
   pyproject.toml            Python package definition; deps: click, pyyaml.
@@ -38,7 +39,7 @@ karakum/
 
 **In scope:**
 - Building toolchain images.
-- Per-session lifecycle: start (create an isolated clone + branch from the memory and project repos), resume, end (push/PR helper), sweep (cleanup merged).
+- Per-session lifecycle: start (create an isolated clone + branch from the memory and project repos), resume, end (push/PR helper), sweep — realized as `just sessions` (list with git/gh status) + `just session-rm <slug>` (delete a named session).
 - Manifest schemas + parsing (agent, project).
 - Secret injection on session start via pluggable provider registry.
 - Preflight checks (docker, manifest exists, repo state matches manifest).
