@@ -162,6 +162,8 @@ def launch(toolchain, agent, slug, project, cmd_args):
 def agents():
     """List configured agents."""
     agents_dir = manifest.config_dir() / "agents"
+    if not agents_dir.exists():
+        return
     for path in sorted(agents_dir.glob("*.yaml")):
         data = manifest.load(path)
         name = manifest.get(data, "name") or path.stem
@@ -174,6 +176,8 @@ def agents():
 def projects():
     """List configured projects."""
     projects_dir = manifest.config_dir() / "projects"
+    if not projects_dir.exists():
+        return
     for path in sorted(projects_dir.glob("*.yaml")):
         data = manifest.load(path)
         name = manifest.get(data, "name") or path.stem

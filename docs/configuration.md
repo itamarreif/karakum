@@ -75,7 +75,7 @@ get deleted often and you want them easy to find and wipe — not buried under
 
 | File | Purpose |
 |------|---------|
-| `config.yaml` | Global settings: `sessions_root`, `state_root`, `cleanup.predicate`. All keys optional — a missing file or key falls back to defaults (`config.py`). |
+| `config.yaml` | Global settings: `sessions_root`, `state_root`. All keys optional — a missing file or key falls back to defaults (`config.py`). |
 | `agents/<name>.yaml` | An agent identity: `name`, `memory.path` (local memory repo), `memory.repository` (canonical remote; preflight verifies the local `origin` matches). Loaded by `manifest.load`. |
 | `projects/<name>.yaml` | A project the agent acts on: `name`, `path`, `repository`. Same preflight check. |
 | `secrets.yaml` | A `secrets:` map of env-var name → URI reference (`op://…`, `env://…`). References only — the launcher resolves each at session start and injects `-e VAR` (name only) into the container; values never touch argv or disk. See `secrets.py` for providers. |
@@ -114,6 +114,18 @@ Override behavior with env vars (e.g. in your shell profile / dotfiles):
 ```bash
 export KARAKUM_CONFIG_DIR=~/dotfiles/karakum   # point config at your dotfiles
 export KARAKUM_DATA_DIR=~/.karakum             # (default) session clones + state
+```
+
+## Migration (existing installs)
+
+If `agents/`, `projects/`, or `secrets.yaml` lived in the repo root, or `config.yaml`
+lived at `~/.karakum/config.yaml`, move them into the config dir:
+
+```bash
+mkdir -p ~/.config/karakum
+mv agents projects secrets.yaml ~/.config/karakum/
+[ -f ~/.karakum/config.yaml ] && mv ~/.karakum/config.yaml ~/.config/karakum/
+# data (~/.karakum/sessions, ~/.karakum/state) stays put — nothing to move
 ```
 
 ## Install & sharing roadmap
