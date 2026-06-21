@@ -46,12 +46,17 @@ def iter_sessions(agent: str | None = None) -> list[Session]:
         if agent is not None and agent_dir.name != agent:
             continue
         for slug_dir in sorted(p for p in agent_dir.iterdir() if p.is_dir()):
-            branch = f"{agent_dir.name}/{slug_dir.name}"
-            clones = [
-                Clone(label=label_dir.name, path=label_dir, branch=branch)
-                for label_dir in sorted(p for p in slug_dir.iterdir() if p.is_dir())
-                if (label_dir / ".git").is_dir()
-            ]
+            inferred_branch = f"{agent_dir.name}/{slug_dir.name}"
+            clones = []
+            for label_dir in sorted(p for p in slug_dir.iterdir() if p.is_dir()):
+                if not (label_dir / ".git").is_dir():
+                    continue
+                r = subprocess.run(
+                    ["git", "-C", str(label_dir), "rev-parse", "--abbrev-ref", "HEAD"],
+                    capture_output=True, text=True,
+                )
+                branch = r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else inferred_branch
+                clones.append(Clone(label=label_dir.name, path=label_dir, branch=branch))
             if clones:
                 sessions.append(
                     Session(agent=agent_dir.name, slug=slug_dir.name, path=slug_dir, clones=clones)

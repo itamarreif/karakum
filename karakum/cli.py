@@ -197,7 +197,7 @@ def session_group():
 def session_ls(agent):
     """List session clones and their status (one row per clone).
 
-    Columns: agent  label  pr-state  slug  branch
+    Columns: agent  label  slug  pr-state  branch
     Branch is decorated: * = dirty, ↑N = N unpushed commits.
     """
     found = cleanup.iter_sessions(agent)
@@ -215,7 +215,7 @@ def session_ls(agent):
             if ahead:
                 branch += f"↑{ahead}"
             pr = cleanup.pr_state(c) if have_gh else "?"
-            print(f"{s.agent}\t{c.label}\t{pr}\t{s.slug}\t{branch}")
+            print(f"{s.agent}\t{c.label}\t{s.slug}\t{pr}\t{branch}")
 
 
 @session_group.command("rm")
