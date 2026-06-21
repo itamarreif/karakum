@@ -105,23 +105,26 @@ def pr_states(clones: list[Clone]) -> dict[str, str]:
         url = r.stdout.strip() if r.returncode == 0 else ""
         by_origin.setdefault(url, []).append(clone)
 
-    branch_to_state: dict[str, str] = {}
-    for url, repo_clones in by_origin.items():
-        if not url:
-            continue
+    def _fetch(url: str, repo_clones: list[Clone]) -> dict[str, str]:
         result = subprocess.run(
             ["gh", "pr", "list", "--state", "all",
              "--json", "number,state,headRefName", "--limit", "200"],
             capture_output=True, text=True, cwd=str(repo_clones[0].path),
         )
         if result.returncode != 0:
-            continue
+            return {}
+        out: dict[str, str] = {}
         for pr in json.loads(result.stdout or "[]"):
             branch = pr["headRefName"]
-            if pr["state"] == "OPEN":
-                branch_to_state[branch] = f"#{pr['number']}"
-            else:
-                branch_to_state[branch] = pr["state"].lower()
+            out[branch] = f"#{pr['number']}" if pr["state"] == "OPEN" else pr["state"].lower()
+        return out
+
+    branch_to_state: dict[str, str] = {}
+    repos = [(url, rc) for url, rc in by_origin.items() if url]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(_fetch, url, rc): url for url, rc in repos}
+        for fut in as_completed(futures):
+            branch_to_state.update(fut.result())
 
     return {clone.branch: branch_to_state.get(clone.branch, "no-pr") for clone in clones}
 
