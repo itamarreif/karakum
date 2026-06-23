@@ -1,4 +1,4 @@
-# Host-wide secrets live in `<repo>/secrets.yaml` under a top-level `secrets:` map
+# Host-wide secrets live in `<config-dir>/secrets.yaml` under a top-level `secrets:` map
 # (env-var name → reference), shared across all agents and toolchains.
 #
 # Each reference uses a URI scheme that selects a provider:
@@ -26,7 +26,7 @@ from typing import Tuple
 
 import yaml
 
-from karakum.manifest import karakum_root
+from karakum.manifest import config_dir
 
 
 def _provider_op(ref: str) -> str:
@@ -56,11 +56,11 @@ _PROVIDERS = {
 
 
 def _load_refs() -> dict:
-    """Read the `secrets:` map from the host-wide `<repo>/secrets.yaml`.
+    """Read the `secrets:` map from the host-wide `<config-dir>/secrets.yaml`.
 
     Missing file → empty map (no secrets), same as an agent with no secrets.
     """
-    path = karakum_root() / "secrets.yaml"
+    path = config_dir() / "secrets.yaml"
     if not path.exists():
         return {}
     with open(path) as f:
@@ -69,7 +69,7 @@ def _load_refs() -> dict:
 
 
 def load() -> Tuple[dict, list]:
-    """Resolve host-wide secrets from `<repo>/secrets.yaml`.
+    """Resolve host-wide secrets from `<config-dir>/secrets.yaml`.
 
     Returns (env_dict, docker_args_list): resolved values keyed by env-var name,
     and `-e VAR` (name only) flags for `docker compose run`.

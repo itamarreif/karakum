@@ -1,0 +1,12 @@
+# A project — a codebase the agent acts on (the per-session workspace). Copy this
+# to <config-dir>/projects/<name>.yaml and edit, where <config-dir> is
+# $KARAKUM_CONFIG_DIR (default ~/.config/karakum).
+#
+# Schema:
+#   name        - identifier (matches the file basename)
+#   path        - local path to the project's git repo
+#   repository  - canonical remote; preflight verifies local origin matches
+
+name: example
+path: ~/code/you/your-repo
+repository: github.com/you/your-repo

@@ -6,3 +6,12 @@ __pycache__/
 *.egg-info/
 .worktrees/
 .claude/settings.local.json
+
+# User config — now lives in $KARAKUM_CONFIG_DIR (default ~/.config/karakum).
+# Kept untracked here so a local checkout can still hold them, but the repo ships
+# only genericized samples under examples/. toolchains.yaml stays tracked.
+# Anchored to the repo root (leading /) so examples/agents, examples/projects,
+# and examples/secrets.yaml are NOT ignored.
+/agents/
+/projects/
+/secrets.yaml

@@ -10,9 +10,10 @@
 #   3. agent-<harness>    — sits downstream of *all* toolchains via `COPY --from`,
 #                           then installs the agent harness (e.g. claude-code).
 #
-# Versions and per-toolchain tool lists live in `toolchains.yaml` at the repo
-# root. To bump Node, Python, uv, or add a Node-side CLI, edit that file and
-# rerun this script — no Dockerfile edits required.
+# Versions and per-toolchain tool lists live in `toolchains.yaml`. The repo ships
+# a default at its root; a copy in the config dir ($KARAKUM_CONFIG_DIR, default
+# ~/.config/karakum) overrides it per-host. To bump Node, Python, uv, or add a
+# Node-side CLI, edit that file and rerun this script — no Dockerfile edits required.
 #
 # Usage: build.sh
 # Exits: 0 success, non-zero on build failure.
@@ -24,10 +25,15 @@ cd "$KARAKUM_ROOT"
 
 command -v yq >/dev/null || { echo "build.sh: yq is required (brew install yq)" >&2; exit 1; }
 
-NODE_VERSION=$(yq   '.node.version'           toolchains.yaml)
-NODE_TOOLS=$(yq     '.node.tools | join(" ")' toolchains.yaml)
-PYTHON_VERSION=$(yq '.python.version'         toolchains.yaml)
-UV_VERSION=$(yq     '.python.uv_version'      toolchains.yaml)
+# Prefer a per-host override from the config dir, else the repo default.
+CONFIG_DIR="${KARAKUM_CONFIG_DIR:-$HOME/.config/karakum}"
+TOOLCHAINS="$KARAKUM_ROOT/toolchains.yaml"
+[ -f "$CONFIG_DIR/toolchains.yaml" ] && TOOLCHAINS="$CONFIG_DIR/toolchains.yaml"
+
+NODE_VERSION=$(yq   '.node.version'           "$TOOLCHAINS")
+NODE_TOOLS=$(yq     '.node.tools | join(" ")' "$TOOLCHAINS")
+PYTHON_VERSION=$(yq '.python.version'         "$TOOLCHAINS")
+UV_VERSION=$(yq     '.python.uv_version'      "$TOOLCHAINS")
 
 echo "karakum: building base image"
 docker build \
