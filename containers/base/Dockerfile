@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ncurses-term \
       openssh-client \
       ripgrep \
+      util-linux \
     && rm -rf /var/lib/apt/lists/*
 
 # just is not in Debian repos — install via official script
@@ -46,6 +47,16 @@ RUN set -eux; \
     fi; \
     useradd -m -u ${HOST_UID} -g ${HOST_GID} -s /bin/bash agent
 
-USER agent
+# Clean, host-distinct interactive prompt (appended so it wins over skel's PS1).
+COPY prompt.bashrc /tmp/kk-prompt.bashrc
+RUN cat /tmp/kk-prompt.bashrc >> /home/agent/.bashrc && rm /tmp/kk-prompt.bashrc
+
+# Entrypoint renames the `agent` account to the launching agent and drops to it.
+# The image therefore stays root by default (no `USER agent`); the entrypoint is
+# the privilege boundary.
+COPY entrypoint.sh /usr/local/bin/karakum-entrypoint
+RUN chmod +x /usr/local/bin/karakum-entrypoint
+
 WORKDIR /home/agent
+ENTRYPOINT ["/usr/local/bin/karakum-entrypoint"]
 CMD ["bash"]

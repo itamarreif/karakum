@@ -13,6 +13,12 @@ from karakum import cleanup, config, manifest, preflight
 from karakum import secrets as ksecrets
 from karakum import session as ksession
 
+# Container home. Every session repo mounts *under* this path so the container
+# never sees host paths: scratchpad (agent memory) → ~/scratchpad, project →
+# ~/<repo-name>. Matches the home of the baked `agent` account (renamed to the
+# launching agent at runtime by the image entrypoint).
+CONTAINER_HOME = "/home/agent"
+
 
 def _git_identity_args(agent: str) -> list[str]:
     """Return docker -e args for GIT_AUTHOR_*/GIT_COMMITTER_* scoped to the agent.
@@ -158,8 +164,9 @@ def launch(toolchain, agent, slug, project, cmd_args):
         session_name = slug
 
     # --- project (optional) ---
+    # Mounts the project clone at ~/<repo-name>; the agent always lands in ~
+    # itself (see -w below), with scratchpad + project as siblings under it.
     project_args: list = []
-    cwd = str(memory_session)
     if project not in ("-", ""):
         proj_data = manifest.load(manifest.project_path(project))
         project_path_ = manifest.expand_path(manifest.get(proj_data, "path"))
@@ -167,17 +174,20 @@ def launch(toolchain, agent, slug, project, cmd_args):
         preflight.check_repo(project_path_, project_repo, f"project '{project}'")
 
         project_session = project_path_ if no_session else ksession.ensure(project_path_, agent, slug, "project", project_repo)
+        project_mount = f"{CONTAINER_HOME}/{Path(project_session).name}"
         project_args = [
-            "-v", f"{project_session}:{project_session}:rw",
-            "-e", f"KARAKUM_PROJECT={project_session}",
+            "-v", f"{project_session}:{project_mount}:rw",
+            "-e", f"KARAKUM_PROJECT={project_mount}",
         ]
-        cwd = str(project_session)
 
     # --- secrets ---
     env_dict, secret_docker_args = ksecrets.load()
     env = os.environ.copy()
     env.update(env_dict)
     env["MEMORY_SESSION"] = str(memory_session)
+    # Where the scratchpad (memory clone) mounts inside the container (compose
+    # reads MEMORY_MOUNT as the bind target; see docker-compose.yaml).
+    env["MEMORY_MOUNT"] = f"{CONTAINER_HOME}/scratchpad"
 
     # Per-agent harness state (~/.claude): a host dir, bind-mounted by compose via
     # ${CLAUDE_STATE_DIR}. Host-owned (created as the launching user == container
@@ -208,13 +218,13 @@ def launch(toolchain, agent, slug, project, cmd_args):
         "--name", container_name,
         "-e", f"KARAKUM_SESSION={session_name}",
         "-e", f"KARAKUM_AGENT={agent}",
-        "-e", f"KARAKUM_MEMORY={memory_session}",
+        "-e", f"KARAKUM_MEMORY={CONTAINER_HOME}/scratchpad",
         *project_args,
         *_git_identity_args(agent),
         *_ssh_agent_args(),
         *_git_signing_args(),
         *_terminal_args(),
-        "-w", cwd,
+        "-w", CONTAINER_HOME,
         *secret_docker_args,
         f"agent-{toolchain}",
         cmd,

@@ -163,8 +163,8 @@ cli.launch(toolchain, agent, slug, project, cmd_args)
 │   ├─ project_session = project_path  (no_session)
 │   │                  |  ksession.ensure(project_path, agent, slug, "project", project_repo)
 │   │                     → <sessions_root>/<agent>/<slug>/<project-name>
-│   └─ project_args = ["-v", "<ps>:<ps>:rw", "-e", "KARAKUM_PROJECT=<ps>"]
-│       cwd = project_session                        # else cwd = memory_session
+│   └─ project_mount = ~/<project-name>             # mount under container home, not host path
+│       project_args = ["-v", "<ps>:<pm>:rw", "-e", "KARAKUM_PROJECT=<pm>"]
 │
 ├─4 SECRETS
 │   ├─ ksecrets.load()                        # reads host-wide <config_dir>/secrets.yaml
@@ -174,16 +174,18 @@ cli.launch(toolchain, agent, slug, project, cmd_args)
 │   │             ├─ _provider_op(ref)  → op read <ref>        (subprocess)
 │   │             └─ _provider_env(ref) → os.environ[VAR]
 │   │         returns (env_dict, ["-e", VAR, ...])
-│   ├─ env = os.environ | env_dict ; env["MEMORY_SESSION"] = memory_session
+│   ├─ env = os.environ | env_dict ; env["MEMORY_SESSION"]=memory_session ; env["MEMORY_MOUNT"]=~/scratchpad
 │   └─ (secret values go into env; only "-e VAR" names hit the argv)
 │
 ├─5 BUILD docker argv
 │   container_name = f"agent-{agent}-{slug_label}-{uuid4[:6]}"
 │   docker_cmd = ["docker","compose","run","--rm","--name",...,
-│                 "-e KARAKUM_SESSION/AGENT/MEMORY", *project_args,
-│                 *_git_identity_args(agent),            # GIT_AUTHOR/COMMITTER → agent
+│                 "-e KARAKUM_SESSION/AGENT", "-e KARAKUM_MEMORY=~/scratchpad", *project_args,
+│                 *_git_identity_args(agent),            # GIT_AUTHOR/COMMITTER → agent (user+agent@host)
 │                 *_ssh_agent_args(),                    # forward host SSH agent (see docs/ssh.md)
-│                 "-w", cwd, *secret_docker_args,
+│                 *_git_signing_args(),                  # SSH commit signing via that agent
+│                 *_terminal_args(),                     # TERM + COLORTERM=truecolor
+│                 "-w", "/home/agent", *secret_docker_args,   # always land in ~
 │                 f"agent-{toolchain}", cmd, *extra_args]
 │
 └─6 HANDOFF
@@ -218,10 +220,11 @@ cli ─┬─► preflight ──► (subprocess: git; shutil: docker/gh)
   `just shell` and `just claude` share one code path — only the final `cmd` differs.
 
 - **Static vs dynamic contract.** `docker-compose.yaml` is the static half: it
-  declares the toolchain service, the `claude` named volume, and the memory
-  mount via `${MEMORY_SESSION}`. `cli.py` is the dynamic half: it injects
-  per-session flags (`-v` project, `-w` cwd, `-e` env, secret `-e` names,
-  `--name`). Compose stays agent/project-agnostic.
+  declares the toolchain service, the `claude` state mount, and the memory mount
+  (host `${MEMORY_SESSION}` → container `${MEMORY_MOUNT}`, i.e. `~/scratchpad`).
+  `cli.py` is the dynamic half: it injects per-session flags (`-v` project at
+  `~/<name>`, `-w /home/agent`, `-e` env, secret `-e` names, `--name`). Compose
+  stays agent/project-agnostic.
 
 - **Three orthogonal axes → three inputs.** toolchain (`agent-<toolchain>`
   service/image) · agent (`<config_dir>/agents/<n>.yaml` → memory) · project

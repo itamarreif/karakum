@@ -20,6 +20,8 @@ RUN ln -sf python3 /usr/local/bin/python
 # --- agent harness ---
 RUN npm install -g @anthropic-ai/claude-code
 
-USER agent
+# Stay root; the base image's entrypoint renames the `agent` account to the
+# launching agent and drops to it. Re-asserting `USER agent` here would bypass
+# that and break the rename.
 WORKDIR /home/agent
 CMD ["bash"]
