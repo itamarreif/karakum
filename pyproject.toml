@@ -14,6 +14,12 @@ dependencies = [
 [project.scripts]
 karakum = "karakum.cli:main"
 
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["karakum*"]

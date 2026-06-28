@@ -9,12 +9,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       bash \
       ca-certificates \
       curl \
+      fzf \
       git \
       gnupg \
       jq \
       less \
+      ncurses-term \
       openssh-client \
       ripgrep \
+      util-linux \
     && rm -rf /var/lib/apt/lists/*
 
 # just is not in Debian repos — install via official script
@@ -45,6 +48,17 @@ RUN set -eux; \
     fi; \
     useradd -m -u ${HOST_UID} -g ${HOST_GID} -s /bin/bash agent
 
-USER agent
+# Replace the verbose Debian skel ~/.bashrc with a tight one (history + ls
+# colors + completion + the clean, host-distinct karakum prompt).
+COPY bashrc /home/agent/.bashrc
+RUN chown agent:agent /home/agent/.bashrc
+
+# Entrypoint renames the `agent` account to the launching agent and drops to it.
+# The image therefore stays root by default (no `USER agent`); the entrypoint is
+# the privilege boundary.
+COPY entrypoint.sh /usr/local/bin/karakum-entrypoint
+RUN chmod +x /usr/local/bin/karakum-entrypoint
+
 WORKDIR /home/agent
+ENTRYPOINT ["/usr/local/bin/karakum-entrypoint"]
 CMD ["bash"]

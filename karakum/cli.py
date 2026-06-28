@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -13,12 +14,25 @@ from karakum import cleanup, config, manifest, preflight
 from karakum import secrets as ksecrets
 from karakum import session as ksession
 
+# Container home. Every session repo mounts *under* this path so the container
+# never sees host paths: scratchpad (agent memory) → ~/scratchpad, project →
+# ~/<repo-name>. Matches the home of the baked `agent` account (renamed to the
+# launching agent at runtime by the image entrypoint).
+CONTAINER_HOME = "/home/agent"
+
 
 def _git_identity_args(agent: str) -> list[str]:
     """Return docker -e args for GIT_AUTHOR_*/GIT_COMMITTER_* scoped to the agent.
 
     Name  → agent name (e.g. "takwin")
-    Email → agent+user@host (e.g. "takwin+itamar.reif@gmail.com")
+    Email → user+agent in the *local part* (e.g. "itamar.reif+takwin@gmail.com")
+
+    The `+agent` subaddress goes before the `@`, not in front of the whole address:
+    plus-addressing routes on `localpart+tag@domain`, so the tag must follow the
+    base username. (A leading `agent+user@host` would route to `agent@host`, an
+    inbox the user doesn't own — and can't verify on GitHub.) For this address to
+    link/verify a commit on GitHub, add it as a verified email there; the provider
+    delivers it to the base inbox. See docs/ssh.md.
     """
     result = subprocess.run(
         ["git", "config", "--global", "user.email"],
@@ -26,7 +40,11 @@ def _git_identity_args(agent: str) -> list[str]:
     )
     if result.returncode != 0 or not (email := result.stdout.strip()):
         return []
-    agent_email = f"{agent}+{email}"
+    if "@" in email:
+        local, domain = email.split("@", 1)
+        agent_email = f"{local}+{agent}@{domain}"
+    else:
+        agent_email = f"{email}+{agent}"
     args = []
     for var, val in (
         ("GIT_AUTHOR_NAME", agent),
@@ -35,6 +53,47 @@ def _git_identity_args(agent: str) -> list[str]:
         ("GIT_COMMITTER_EMAIL", agent_email),
     ):
         args += ["-e", f"{var}={val}"]
+    return args
+
+
+def _git_signing_args() -> list[str]:
+    """Return docker `-e` args that make in-container git SSH-sign commits.
+
+    Mirrors the host's SSH-signing setup using Git's env-var config mechanism
+    (`GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n`), which every git
+    subprocess the agent spawns inherits — same approach as `_git_identity_args`.
+
+    Only the SSH-signing path is supported (`gpg.format=ssh`); GPG hosts are a
+    no-op (they'd need a keyring mounted in). We deliberately do NOT propagate the
+    host's `gpg.ssh.program` (e.g. 1Password's `op-ssh-sign`, which doesn't exist
+    in the image): leaving it unset makes git fall back to `ssh-keygen -Y sign`,
+    which signs via the already-forwarded agent at `$SSH_AUTH_SOCK`. The signing
+    key is held there, so no key material enters the image. We also skip
+    `gpg.ssh.allowedSignersFile` — it's only needed to *verify* signatures locally,
+    not to create them, and GitHub verifies server-side.
+    """
+    def _cfg(key: str) -> str:
+        r = subprocess.run(
+            ["git", "config", "--global", key],
+            capture_output=True, text=True,
+        )
+        return r.stdout.strip() if r.returncode == 0 else ""
+
+    if _cfg("commit.gpgsign").lower() != "true":
+        return []
+    if _cfg("gpg.format") != "ssh":
+        return []
+    if not (signingkey := _cfg("user.signingkey")):
+        return []
+
+    pairs = (
+        ("commit.gpgsign", "true"),
+        ("gpg.format", "ssh"),
+        ("user.signingkey", signingkey),
+    )
+    args = ["-e", f"GIT_CONFIG_COUNT={len(pairs)}"]
+    for i, (key, val) in enumerate(pairs):
+        args += ["-e", f"GIT_CONFIG_KEY_{i}={key}", "-e", f"GIT_CONFIG_VALUE_{i}={val}"]
     return args
 
 
@@ -55,6 +114,19 @@ def _ssh_agent_args() -> list[str]:
         if not src:
             return []
     return ["-v", f"{src}:/ssh-agent.sock", "-e", "SSH_AUTH_SOCK=/ssh-agent.sock"]
+
+
+def _terminal_args() -> list[str]:
+    """Return docker `-e` args so the in-container TUI renders truecolor + events.
+
+    `COLORTERM=truecolor` (not TERM) is what drives 24-bit color, so it's set
+    unconditionally. `TERM` is forwarded from the host — inside tmux that's
+    `tmux-256color` — falling back to `xterm-256color`; the matching terminfo ships
+    via `ncurses-term` in the base image. Mouse/focus/bracketed-paste events are
+    carried by those terminfo entries plus the host tmux's passthrough config.
+    """
+    term = os.environ.get("TERM") or "xterm-256color"
+    return ["-e", f"TERM={term}", "-e", "COLORTERM=truecolor"]
 
 
 @click.group()
@@ -93,8 +165,9 @@ def launch(toolchain, agent, slug, project, cmd_args):
         session_name = slug
 
     # --- project (optional) ---
+    # Mounts the project clone at ~/<repo-name>; the agent always lands in ~
+    # itself (see -w below), with scratchpad + project as siblings under it.
     project_args: list = []
-    cwd = str(memory_session)
     if project not in ("-", ""):
         proj_data = manifest.load(manifest.project_path(project))
         project_path_ = manifest.expand_path(manifest.get(proj_data, "path"))
@@ -102,17 +175,20 @@ def launch(toolchain, agent, slug, project, cmd_args):
         preflight.check_repo(project_path_, project_repo, f"project '{project}'")
 
         project_session = project_path_ if no_session else ksession.ensure(project_path_, agent, slug, "project", project_repo)
+        project_mount = f"{CONTAINER_HOME}/{Path(project_session).name}"
         project_args = [
-            "-v", f"{project_session}:{project_session}:rw",
-            "-e", f"KARAKUM_PROJECT={project_session}",
+            "-v", f"{project_session}:{project_mount}:rw",
+            "-e", f"KARAKUM_PROJECT={project_mount}",
         ]
-        cwd = str(project_session)
 
     # --- secrets ---
     env_dict, secret_docker_args = ksecrets.load()
     env = os.environ.copy()
     env.update(env_dict)
     env["MEMORY_SESSION"] = str(memory_session)
+    # Where the scratchpad (memory clone) mounts inside the container (compose
+    # reads MEMORY_MOUNT as the bind target; see docker-compose.yaml).
+    env["MEMORY_MOUNT"] = f"{CONTAINER_HOME}/scratchpad"
 
     # Per-agent harness state (~/.claude): a host dir, bind-mounted by compose via
     # ${CLAUDE_STATE_DIR}. Host-owned (created as the launching user == container
@@ -143,11 +219,13 @@ def launch(toolchain, agent, slug, project, cmd_args):
         "--name", container_name,
         "-e", f"KARAKUM_SESSION={session_name}",
         "-e", f"KARAKUM_AGENT={agent}",
-        "-e", f"KARAKUM_MEMORY={memory_session}",
+        "-e", f"KARAKUM_MEMORY={CONTAINER_HOME}/scratchpad",
         *project_args,
         *_git_identity_args(agent),
         *_ssh_agent_args(),
-        "-w", cwd,
+        *_git_signing_args(),
+        *_terminal_args(),
+        "-w", CONTAINER_HOME,
         *secret_docker_args,
         f"agent-{toolchain}",
         cmd,
@@ -156,6 +234,33 @@ def launch(toolchain, agent, slug, project, cmd_args):
 
     os.chdir(manifest.karakum_root())
     os.execvpe(docker_cmd[0], docker_cmd, env)
+
+
+@main.command("pngpaste")
+@click.argument("agent")
+@click.argument("slug")
+@click.argument("name", default="clip.png")
+def pngpaste(agent, slug, name):
+    """Copy the macOS clipboard image into the <agent>/<slug> container's /tmp.
+
+    Prints `/tmp/<name>` to hand to the agent — the supported way to get an image
+    into containerized Claude, which can't read the host clipboard directly. Needs
+    `pngpaste` on the host (`brew install pngpaste`).
+    """
+    if shutil.which("pngpaste") is None:
+        raise click.ClickException("pngpaste not found — install it with `brew install pngpaste`")
+    names = subprocess.run(
+        ["docker", "ps", "--filter", f"name=agent-{agent}-{slug}-", "--format", "{{.Names}}"],
+        capture_output=True, text=True,
+    ).stdout.split()
+    if not names:
+        raise click.ClickException(f"no running container for {agent}/{slug}")
+    with tempfile.NamedTemporaryFile(suffix=".png") as f:
+        if subprocess.run(["pngpaste", f.name]).returncode != 0:
+            raise click.ClickException("pngpaste failed — is there an image on the clipboard?")
+        for c in names:  # copy to every matching container (e.g. multiple terminals)
+            subprocess.run(["docker", "cp", f.name, f"{c}:/tmp/{name}"], check=True)
+    click.echo(f"/tmp/{name}")
 
 
 @main.command("agents")

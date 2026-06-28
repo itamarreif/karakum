@@ -1,0 +1,40 @@
+# karakum agent ~/.bashrc — a tight replacement for the verbose Debian skel one.
+# (System-wide /etc/bash.bashrc still runs first; this just adds our bits last.)
+
+# Interactive shells only.
+case $- in *i*) ;; *) return ;; esac
+
+# History.
+HISTCONTROL=ignoreboth
+HISTSIZE=1000
+HISTFILESIZE=2000
+shopt -s histappend checkwinsize
+
+# ls/grep color. Load the full GNU palette, then recolor directories magenta so
+# a devcontainer `ls` is unmistakable next to the host (blue dirs) — matching the
+# magenta prompt into one "this is the container" theme.
+eval "$(dircolors -b)"
+LS_COLORS="${LS_COLORS}:di=01;35"
+export LS_COLORS
+alias ls='ls --color=auto'
+alias grep='grep --color=auto'
+
+# bash completion.
+[ -f /usr/share/bash-completion/bash_completion ] && . /usr/share/bash-completion/bash_completion
+
+# fzf keybindings + completion (Ctrl-R history, Ctrl-T files, Alt-C cd).
+if command -v fzf >/dev/null 2>&1; then
+    if fzf --bash >/dev/null 2>&1; then           # fzf ≥ 0.48
+        eval "$(fzf --bash)"
+    else                                          # Debian bookworm (0.38)
+        [ -f /usr/share/doc/fzf/examples/key-bindings.bash ] && . /usr/share/doc/fzf/examples/key-bindings.bash
+        [ -f /usr/share/doc/fzf/examples/completion.bash   ] && . /usr/share/doc/fzf/examples/completion.bash
+    fi
+fi
+
+# Prompt: `<agent>:<~-path> (√)|(?code) λ`. Magenta name + λ sigil set the
+# container clearly apart from the host (green name, $ sigil); path is cyan. `\u`
+# is the agent (the unix user is renamed to it by the image entrypoint); `\w` is
+# the ~-relative path; the `$(…)` shows green (√)/red (?<code>), colored with raw
+# \001/\002 (the bytes behind \[ \]) since bash doesn't re-process \[ \] from a $(…).
+PS1='\[\e[1;35m\]\u\[\e[0m\]:\[\e[36m\]\w\[\e[0m\] $(c=$?; if [ "$c" = 0 ]; then printf "\001\033[32m\002(√)\001\033[0m\002"; else printf "\001\033[31m\002(?%s)\001\033[0m\002" "$c"; fi) \[\e[1;35m\]λ\[\e[0m\] '

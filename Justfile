@@ -23,6 +23,10 @@ build:
 install:
     uv pip install -e .
 
+# Run the unit test suite.
+test:
+    uv run --group dev pytest
+
 # Run Claude Code: just claude <agent> [<session>] [<project>]
 claude agent session="-" project="-":
     uv run karakum launch claude {{agent}} {{session}} {{project}} claude
@@ -30,6 +34,11 @@ claude agent session="-" project="-":
 # Drop into bash: just shell <agent> [<session>] [<project>]
 shell agent session="-" project="-":
     uv run karakum launch claude {{agent}} {{session}} {{project}} bash
+
+# Copy the macOS clipboard image into the session container's /tmp; prints the path
+# to hand to the agent. just pngpaste <agent> <session> [<name>]
+pngpaste agent session name="clip.png":
+    uv run karakum pngpaste {{agent}} {{session}} {{name}}
 
 # List configured agents.
 agents:
