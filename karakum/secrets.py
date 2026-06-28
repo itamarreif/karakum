@@ -19,9 +19,11 @@
 #   - Any failure raises SystemExit(2); no silent partial state.
 
 import os
+import re
 import shutil
 import subprocess
 import sys
+import uuid
 from typing import Tuple
 
 import yaml
@@ -29,15 +31,33 @@ import yaml
 from karakum.manifest import config_dir
 
 
-def _provider_op(ref: str) -> str:
+def _resolve_op(refs: dict) -> dict:
+    """Resolve every op:// reference in a SINGLE `op` process via `op inject`.
+
+    One `op` process means one macOS authorization/unlock prompt, regardless of
+    how many op:// secrets there are — calling `op read` once per secret prompts
+    once each. Each value is fenced with a random boundary so arbitrary content
+    (newlines included) round-trips unambiguously.
+    """
     if not shutil.which("op"):
         print("karakum: 'op' not on PATH (brew install 1password-cli; then 'op signin')", file=sys.stderr)
         raise SystemExit(2)
-    result = subprocess.run(["op", "read", ref], capture_output=True, text=True)
+    boundary = uuid.uuid4().hex
+    template = "".join(
+        f"{boundary}:{var}:{{{{ {ref} }}}}:{boundary}\n" for var, ref in refs.items()
+    )
+    result = subprocess.run(["op", "inject"], input=template, capture_output=True, text=True)
     if result.returncode != 0:
-        print(f"karakum: op read failed for {ref}: {result.stderr.strip()}", file=sys.stderr)
+        print(f"karakum: op inject failed: {result.stderr.strip()}", file=sys.stderr)
         raise SystemExit(2)
-    return result.stdout.rstrip("\n")
+    resolved = {}
+    for var in refs:
+        m = re.search(rf"{boundary}:{re.escape(var)}:(.*?):{boundary}", result.stdout, re.DOTALL)
+        if m is None:
+            print(f"karakum: could not resolve op secret '{var}' from op inject output", file=sys.stderr)
+            raise SystemExit(2)
+        resolved[var] = m.group(1).rstrip("\n")
+    return resolved
 
 
 def _provider_env(ref: str) -> str:
@@ -49,8 +69,9 @@ def _provider_env(ref: str) -> str:
     return value
 
 
+# Per-reference providers for schemes resolved one at a time. op:// is handled
+# separately (batched in a single `op` call — see `_resolve_op`).
 _PROVIDERS = {
-    "op": _provider_op,
     "env": _provider_env,
 }
 
@@ -76,17 +97,22 @@ def load() -> Tuple[dict, list]:
     """
     env_dict: dict = {}
     docker_args: list = []
+    op_refs: dict = {}
     for var, ref in _load_refs().items():
         if "://" not in ref:
             print(f"karakum: malformed secret reference (no scheme): {ref}", file=sys.stderr)
             raise SystemExit(2)
         scheme = ref.split("://", 1)[0]
-        provider = _PROVIDERS.get(scheme)
-        if provider is None:
-            print(f"karakum: no provider registered for scheme '{scheme}' (ref: {ref})", file=sys.stderr)
-            print(f"        registered schemes: {', '.join(_PROVIDERS)}", file=sys.stderr)
-            raise SystemExit(2)
-        value = provider(ref)
-        env_dict[var] = value
+        if scheme == "op":
+            op_refs[var] = ref  # resolved together below, in one op call
+        else:
+            provider = _PROVIDERS.get(scheme)
+            if provider is None:
+                print(f"karakum: no provider registered for scheme '{scheme}' (ref: {ref})", file=sys.stderr)
+                print(f"        registered schemes: {', '.join(['op', *_PROVIDERS])}", file=sys.stderr)
+                raise SystemExit(2)
+            env_dict[var] = provider(ref)
         docker_args.extend(["-e", var])
+    if op_refs:
+        env_dict.update(_resolve_op(op_refs))
     return env_dict, docker_args
