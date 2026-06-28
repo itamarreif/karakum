@@ -31,6 +31,13 @@ claude agent session="-" project="-":
 shell agent session="-" project="-":
     uv run karakum launch claude {{agent}} {{session}} {{project}} bash
 
+# Dump the macOS clipboard image into a session's scratchpad, print its in-container
+# path to hand to the agent (containerized Claude can't read the host clipboard).
+# Needs pngpaste (`brew install pngpaste`). just pngpaste <agent> <session> [<name>]
+pngpaste agent session name="clip.png":
+    pngpaste "${KARAKUM_DATA_DIR:-$HOME/.karakum}/sessions/{{agent}}/{{session}}/scratchpad/{{name}}"
+    @echo "~/scratchpad/{{name}}"
+
 # List configured agents.
 agents:
     uv run karakum agents
