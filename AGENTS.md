@@ -24,13 +24,13 @@ karakum/
   secrets.yaml              Host-wide secret references (op://…), shared by all agents.
   Justfile                  Host entry point: thin recipes dispatching to the CLI.
   karakum/                  Python CLI package (uv pip install -e . or uv run karakum).
-    cli.py                  Entry point: launch, agents, projects, session group (ls / rm).
+    cli.py                  Entry point: launch, build, agents, projects, session group (ls / rm).
     manifest.py             YAML manifest loading.
     preflight.py            Docker + git + gh checks.
     secrets.py              Secret resolution (op://, env://); pluggable providers.
     session.py              Per-session isolated clone lifecycle.
     cleanup.py              Session listing (iter_sessions, pr_states) + remove.
-  scripts/build.sh          Docker image build (standalone; no Python dependency).
+  toolchains.yaml           Toolchain versions + per-ecosystem tools, read by `karakum build`.
   docker-compose.yaml       One service per toolchain.
   pyproject.toml            Python package definition; deps: click, pyyaml.
 ```
@@ -59,10 +59,10 @@ karakum/
 
 Two skills guide work in this repo:
 
-- **`makefile`** — Justfile structure. Targets are 1-liners; logic delegates to `karakum/` (Python) or `scripts/` (build only). No multi-line shell in the Justfile.
+- **`makefile`** — Justfile structure. Targets are 1-liners; logic delegates to `karakum/` (Python). No multi-line shell in the Justfile.
 - **`secrets`** — credential methodology. `secrets.yaml` uses URI references (`op://…`, `env://…`); resolution dispatches by scheme through a pluggable registry in `karakum/secrets.py`. 1P is the default but not hardcoded.
 
-Orchestration logic lives in the Python package (`karakum/`). `scripts/build.sh` is the only remaining shell script and handles Docker image builds only. Run the CLI via `uv run karakum` or `just <recipe>`.
+Orchestration logic lives in the Python package (`karakum/`) — including Docker image builds (`karakum build`). There are no shell scripts. Run the CLI via `uv run karakum` or `just <recipe>`.
 
 ## Conventions specific to karakum
 
@@ -81,7 +81,7 @@ Orchestration logic lives in the Python package (`karakum/`). `scripts/build.sh`
 - Don't bake credentials into images or volumes — see the `secrets` skill.
 - Don't add agent-specific logic to images. Agent-specificity lives in `agents/<name>.yaml`.
 - Don't add project-specific logic to images either. Project-specificity is in `projects/<name>.yaml` plus what's in the project's own repo.
-- Don't put logic in the Justfile. Extract to `karakum/` (Python) or `scripts/build.sh` (Docker builds).
+- Don't put logic in the Justfile. Extract to `karakum/` (Python), including Docker builds (`karakum build`).
 - Don't add new shell scripts. Orchestration logic belongs in the Python package.
 
 ## Planning context

@@ -15,9 +15,9 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 default:
     @just --list
 
-# Build base + toolchain images.
+# Build base + toolchain + agent images.
 build:
-    bash scripts/build.sh
+    uv run karakum build
 
 # Install karakum CLI into the uv-managed virtual environment.
 install:

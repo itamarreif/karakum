@@ -17,6 +17,17 @@ COPY --from=karakum-toolchain-python:latest /usr/local/bin/uvx     /usr/local/bi
 COPY --from=karakum-toolchain-python:latest /usr/local/lib/        /usr/local/lib/
 RUN ln -sf python3 /usr/local/bin/python
 
+# --- rust + cargo (rustup toolchain from official rust image) ---
+# The official rust image installs via rustup: the binaries in /usr/local/cargo/bin
+# (cargo, rustc, rustup, ...) are proxies that dispatch to the real toolchain under
+# /usr/local/rustup. So copy both dirs and set CARGO_HOME/RUSTUP_HOME (the install
+# dirs are non-default, so the proxies can't find the toolchain without them).
+COPY --from=karakum-toolchain-rust:latest /usr/local/cargo  /usr/local/cargo
+COPY --from=karakum-toolchain-rust:latest /usr/local/rustup /usr/local/rustup
+ENV CARGO_HOME=/usr/local/cargo \
+    RUSTUP_HOME=/usr/local/rustup \
+    PATH=/usr/local/cargo/bin:$PATH
+
 # --- agent harness ---
 RUN npm install -g @anthropic-ai/claude-code
 

@@ -57,14 +57,14 @@ karakum/
   toolchains.yaml           Default toolchain versions.
   Justfile                  Host entry point — thin recipes dispatching to the CLI.
   karakum/                  Python CLI package (install with `just install`).
-    cli.py                  Click entry point: launch, agents, projects, session group.
+    cli.py                  Click entry point: launch, build, agents, projects, session group.
     manifest.py             YAML manifest loading + location resolvers.
     config.py               Optional host settings (config.yaml) + session/state roots.
     preflight.py            Docker + git repo checks.
     secrets.py              Secret resolution (op://, env://).
     session.py              Per-session isolated clone lifecycle.
     cleanup.py              Session enumeration + remove logic.
-  scripts/build.sh          Docker image build script.
+  toolchains.yaml           Toolchain versions + tools, read by `karakum build`.
   docker-compose.yaml       One service per toolchain.
   docs/architecture.md      CLI structure + per-command call graphs.
   docs/configuration.md     The three-location config model.
