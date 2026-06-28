@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -233,6 +234,33 @@ def launch(toolchain, agent, slug, project, cmd_args):
 
     os.chdir(manifest.karakum_root())
     os.execvpe(docker_cmd[0], docker_cmd, env)
+
+
+@main.command("pngpaste")
+@click.argument("agent")
+@click.argument("slug")
+@click.argument("name", default="clip.png")
+def pngpaste(agent, slug, name):
+    """Copy the macOS clipboard image into the <agent>/<slug> container's /tmp.
+
+    Prints `/tmp/<name>` to hand to the agent — the supported way to get an image
+    into containerized Claude, which can't read the host clipboard directly. Needs
+    `pngpaste` on the host (`brew install pngpaste`).
+    """
+    if shutil.which("pngpaste") is None:
+        raise click.ClickException("pngpaste not found — install it with `brew install pngpaste`")
+    names = subprocess.run(
+        ["docker", "ps", "--filter", f"name=agent-{agent}-{slug}-", "--format", "{{.Names}}"],
+        capture_output=True, text=True,
+    ).stdout.split()
+    if not names:
+        raise click.ClickException(f"no running container for {agent}/{slug}")
+    with tempfile.NamedTemporaryFile(suffix=".png") as f:
+        if subprocess.run(["pngpaste", f.name]).returncode != 0:
+            raise click.ClickException("pngpaste failed — is there an image on the clipboard?")
+        for c in names:  # copy to every matching container (e.g. multiple terminals)
+            subprocess.run(["docker", "cp", f.name, f"{c}:/tmp/{name}"], check=True)
+    click.echo(f"/tmp/{name}")
 
 
 @main.command("agents")
