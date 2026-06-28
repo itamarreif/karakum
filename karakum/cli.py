@@ -98,6 +98,19 @@ def _ssh_agent_args() -> list[str]:
     return ["-v", f"{src}:/ssh-agent.sock", "-e", "SSH_AUTH_SOCK=/ssh-agent.sock"]
 
 
+def _terminal_args() -> list[str]:
+    """Return docker `-e` args so the in-container TUI renders truecolor + events.
+
+    `COLORTERM=truecolor` (not TERM) is what drives 24-bit color, so it's set
+    unconditionally. `TERM` is forwarded from the host — inside tmux that's
+    `tmux-256color` — falling back to `xterm-256color`; the matching terminfo ships
+    via `ncurses-term` in the base image. Mouse/focus/bracketed-paste events are
+    carried by those terminfo entries plus the host tmux's passthrough config.
+    """
+    term = os.environ.get("TERM") or "xterm-256color"
+    return ["-e", f"TERM={term}", "-e", "COLORTERM=truecolor"]
+
+
 @click.group()
 def main():
     pass
@@ -189,6 +202,7 @@ def launch(toolchain, agent, slug, project, cmd_args):
         *_git_identity_args(agent),
         *_ssh_agent_args(),
         *_git_signing_args(),
+        *_terminal_args(),
         "-w", cwd,
         *secret_docker_args,
         f"agent-{toolchain}",

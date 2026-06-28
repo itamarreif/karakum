@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       gnupg \
       jq \
       less \
+      ncurses-term \
       openssh-client \
       ripgrep \
     && rm -rf /var/lib/apt/lists/*

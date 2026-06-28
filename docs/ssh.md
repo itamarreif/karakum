@@ -54,11 +54,18 @@ in the image) instead of a host-only signer like 1Password's `op-ssh-sign` — a
 `ssh-keygen` signs using the key in the forwarded `$SSH_AUTH_SOCK`. GPG signing is
 not supported (no keyring is mounted in).
 
-For the **"Verified"** badge on GitHub, the key must be registered as a **Signing
-key** (GitHub → Settings → SSH and GPG keys → New SSH key → Key type: *Signing
-Key*). A key added only for *authentication* will still sign commits, but GitHub
-shows them as "Unverified". The same physical key can be added twice — once as an
-Authentication key, once as a Signing key.
+For the **"Verified"** badge on GitHub, two things are required:
+
+1. **Register the key as a Signing key** — GitHub → Settings → SSH and GPG keys →
+   New SSH key → Key type: *Signing Key*. A key added only for *authentication* will
+   still sign commits, but GitHub shows them as "Unverified". The same physical key
+   can be added twice — once as an Authentication key, once as a Signing key.
+2. **Verify the agent committer email on your account** — commits use the
+   `agent+you@host` identity (e.g. `takwin+itamar.reif@gmail.com`). If that address
+   isn't a verified email on your GitHub account, GitHub reports *"No user is
+   associated with the committer email"* and won't link or verify the commit. Add it
+   under GitHub → Settings → **Emails**; Gmail delivers `+`-aliases to the base inbox,
+   so the verification mail arrives at `you@host`. Add one alias per agent name.
 
 ## Verify
 
