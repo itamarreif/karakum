@@ -23,6 +23,10 @@ build:
 install:
     uv pip install -e .
 
+# Run the unit test suite.
+test:
+    uv run --group dev pytest
+
 # Run Claude Code: just claude <agent> [<session>] [<project>]
 claude agent session="-" project="-":
     uv run karakum launch claude {{agent}} {{session}} {{project}} claude
