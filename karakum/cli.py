@@ -18,7 +18,14 @@ def _git_identity_args(agent: str) -> list[str]:
     """Return docker -e args for GIT_AUTHOR_*/GIT_COMMITTER_* scoped to the agent.
 
     Name  → agent name (e.g. "takwin")
-    Email → agent+user@host (e.g. "takwin+itamar.reif@gmail.com")
+    Email → user+agent in the *local part* (e.g. "itamar.reif+takwin@gmail.com")
+
+    The `+agent` subaddress goes before the `@`, not in front of the whole address:
+    plus-addressing routes on `localpart+tag@domain`, so the tag must follow the
+    base username. (A leading `agent+user@host` would route to `agent@host`, an
+    inbox the user doesn't own — and can't verify on GitHub.) For this address to
+    link/verify a commit on GitHub, add it as a verified email there; the provider
+    delivers it to the base inbox. See docs/ssh.md.
     """
     result = subprocess.run(
         ["git", "config", "--global", "user.email"],
@@ -26,7 +33,11 @@ def _git_identity_args(agent: str) -> list[str]:
     )
     if result.returncode != 0 or not (email := result.stdout.strip()):
         return []
-    agent_email = f"{agent}+{email}"
+    if "@" in email:
+        local, domain = email.split("@", 1)
+        agent_email = f"{local}+{agent}@{domain}"
+    else:
+        agent_email = f"{email}+{agent}"
     args = []
     for var, val in (
         ("GIT_AUTHOR_NAME", agent),

@@ -60,12 +60,15 @@ For the **"Verified"** badge on GitHub, two things are required:
    New SSH key → Key type: *Signing Key*. A key added only for *authentication* will
    still sign commits, but GitHub shows them as "Unverified". The same physical key
    can be added twice — once as an Authentication key, once as a Signing key.
-2. **Verify the agent committer email on your account** — commits use the
-   `agent+you@host` identity (e.g. `takwin+itamar.reif@gmail.com`). If that address
-   isn't a verified email on your GitHub account, GitHub reports *"No user is
-   associated with the committer email"* and won't link or verify the commit. Add it
-   under GitHub → Settings → **Emails**; Gmail delivers `+`-aliases to the base inbox,
-   so the verification mail arrives at `you@host`. Add one alias per agent name.
+2. **Verify the agent committer email on your account** — commits use a
+   plus-addressed identity with the agent in the local part
+   (`you+agent@host`, e.g. `itamar.reif+takwin@gmail.com`). If that address isn't a
+   verified email on your GitHub account, GitHub reports *"No user is associated with
+   the committer email"* and won't link or verify the commit. Add it under GitHub →
+   Settings → **Emails**; the provider delivers `+`-tags to your base inbox
+   (`you@host`), so the verification mail arrives normally. Add one alias per agent
+   name. (Note: the tag must follow the username — `you+agent@host`, *not*
+   `agent+you@host`, which would route to a different mailbox.)
 
 ## Verify
 
