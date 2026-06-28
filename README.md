@@ -180,7 +180,7 @@ The agent sees **only** its memory clone and (if specified) project clone — no
 
 ### Git auth
 
-In-container `git push`/`pull` authenticate over SSH via your **forwarded host SSH agent** — no private keys enter the image, and it's automatic (no flag). The container uses whatever your host *default* agent holds; commits are attributed to the agent, the push is signed by the host key. Works on macOS (Docker Desktop and OrbStack, via the host-services bridge) and native Linux. To use 1Password keys, make the 1Password agent your default. Details + verification: [`docs/ssh.md`](docs/ssh.md).
+In-container `git push`/`pull` authenticate over SSH via your **forwarded host SSH agent** — no private keys enter the image, and it's automatic (no flag). The container uses whatever your host *default* agent holds; commits are attributed to the agent and, when your host SSH-signs commits, signed by that same forwarded key. Works on macOS (Docker Desktop and OrbStack, via the host-services bridge) and native Linux. To use 1Password keys, make the 1Password agent your default. Details + verification: [`docs/ssh.md`](docs/ssh.md).
 
 ## Secrets
 

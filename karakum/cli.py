@@ -38,6 +38,47 @@ def _git_identity_args(agent: str) -> list[str]:
     return args
 
 
+def _git_signing_args() -> list[str]:
+    """Return docker `-e` args that make in-container git SSH-sign commits.
+
+    Mirrors the host's SSH-signing setup using Git's env-var config mechanism
+    (`GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n`), which every git
+    subprocess the agent spawns inherits — same approach as `_git_identity_args`.
+
+    Only the SSH-signing path is supported (`gpg.format=ssh`); GPG hosts are a
+    no-op (they'd need a keyring mounted in). We deliberately do NOT propagate the
+    host's `gpg.ssh.program` (e.g. 1Password's `op-ssh-sign`, which doesn't exist
+    in the image): leaving it unset makes git fall back to `ssh-keygen -Y sign`,
+    which signs via the already-forwarded agent at `$SSH_AUTH_SOCK`. The signing
+    key is held there, so no key material enters the image. We also skip
+    `gpg.ssh.allowedSignersFile` — it's only needed to *verify* signatures locally,
+    not to create them, and GitHub verifies server-side.
+    """
+    def _cfg(key: str) -> str:
+        r = subprocess.run(
+            ["git", "config", "--global", key],
+            capture_output=True, text=True,
+        )
+        return r.stdout.strip() if r.returncode == 0 else ""
+
+    if _cfg("commit.gpgsign").lower() != "true":
+        return []
+    if _cfg("gpg.format") != "ssh":
+        return []
+    if not (signingkey := _cfg("user.signingkey")):
+        return []
+
+    pairs = (
+        ("commit.gpgsign", "true"),
+        ("gpg.format", "ssh"),
+        ("user.signingkey", signingkey),
+    )
+    args = ["-e", f"GIT_CONFIG_COUNT={len(pairs)}"]
+    for i, (key, val) in enumerate(pairs):
+        args += ["-e", f"GIT_CONFIG_KEY_{i}={key}", "-e", f"GIT_CONFIG_VALUE_{i}={val}"]
+    return args
+
+
 def _ssh_agent_args() -> list[str]:
     """Return docker `-v`/`-e` args that forward the host SSH agent for in-container git.
 
@@ -147,6 +188,7 @@ def launch(toolchain, agent, slug, project, cmd_args):
         *project_args,
         *_git_identity_args(agent),
         *_ssh_agent_args(),
+        *_git_signing_args(),
         "-w", cwd,
         *secret_docker_args,
         f"agent-{toolchain}",
