@@ -10,11 +10,11 @@ HISTSIZE=1000
 HISTFILESIZE=2000
 shopt -s histappend checkwinsize
 
-# ls/grep color. Load the full GNU palette, then recolor directories yellow to
-# match the prompt — so a devcontainer `ls` is visibly distinct from the host
-# (blue dirs) at a glance, reinforcing "this is the container".
+# ls/grep color. Load the full GNU palette, then recolor directories magenta so
+# a devcontainer `ls` is unmistakable next to the host (blue dirs) — matching the
+# magenta prompt into one "this is the container" theme.
 eval "$(dircolors -b)"
-LS_COLORS="${LS_COLORS}:di=01;33"
+LS_COLORS="${LS_COLORS}:di=01;35"
 export LS_COLORS
 alias ls='ls --color=auto'
 alias grep='grep --color=auto'
@@ -32,10 +32,9 @@ if command -v fzf >/dev/null 2>&1; then
     fi
 fi
 
-# Prompt: `<agent>:<~-path> (√)|(?code) $`. Same shape as the host prompt but the
-# name is yellow (host is green) so container ≠ host at a glance. `\u` is the
-# agent (the unix user is renamed to it by the image entrypoint); `\w` is the
-# ~-relative path; the `$(…)` shows green (√) on success or red (?<exit-code>) on
-# failure, colored with raw \001/\002 (the bytes behind \[ \]) since bash does
-# not re-process \[ \] that comes out of a command substitution.
-PS1='\[\e[1;33m\]\u\[\e[0m\]:\[\e[1;34m\]\w\[\e[0m\] $(c=$?; if [ "$c" = 0 ]; then printf "\001\033[32m\002(√)\001\033[0m\002"; else printf "\001\033[31m\002(?%s)\001\033[0m\002" "$c"; fi) \$ '
+# Prompt: `<agent>:<~-path> (√)|(?code) λ`. Magenta name + λ sigil set the
+# container clearly apart from the host (green name, $ sigil); path is cyan. `\u`
+# is the agent (the unix user is renamed to it by the image entrypoint); `\w` is
+# the ~-relative path; the `$(…)` shows green (√)/red (?<code>), colored with raw
+# \001/\002 (the bytes behind \[ \]) since bash doesn't re-process \[ \] from a $(…).
+PS1='\[\e[1;35m\]\u\[\e[0m\]:\[\e[36m\]\w\[\e[0m\] $(c=$?; if [ "$c" = 0 ]; then printf "\001\033[32m\002(√)\001\033[0m\002"; else printf "\001\033[31m\002(?%s)\001\033[0m\002" "$c"; fi) \[\e[1;35m\]λ\[\e[0m\] '
