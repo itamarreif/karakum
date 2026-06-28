@@ -10,10 +10,27 @@ HISTSIZE=1000
 HISTFILESIZE=2000
 shopt -s histappend checkwinsize
 
-# Colors + completion.
+# ls/grep color. Load the full GNU palette, then recolor directories yellow to
+# match the prompt — so a devcontainer `ls` is visibly distinct from the host
+# (blue dirs) at a glance, reinforcing "this is the container".
+eval "$(dircolors -b)"
+LS_COLORS="${LS_COLORS}:di=01;33"
+export LS_COLORS
 alias ls='ls --color=auto'
 alias grep='grep --color=auto'
+
+# bash completion.
 [ -f /usr/share/bash-completion/bash_completion ] && . /usr/share/bash-completion/bash_completion
+
+# fzf keybindings + completion (Ctrl-R history, Ctrl-T files, Alt-C cd).
+if command -v fzf >/dev/null 2>&1; then
+    if fzf --bash >/dev/null 2>&1; then           # fzf ≥ 0.48
+        eval "$(fzf --bash)"
+    else                                          # Debian bookworm (0.38)
+        [ -f /usr/share/doc/fzf/examples/key-bindings.bash ] && . /usr/share/doc/fzf/examples/key-bindings.bash
+        [ -f /usr/share/doc/fzf/examples/completion.bash   ] && . /usr/share/doc/fzf/examples/completion.bash
+    fi
+fi
 
 # Prompt: `<agent>:<~-path> (√)|(?code) $`. Same shape as the host prompt but the
 # name is yellow (host is green) so container ≠ host at a glance. `\u` is the
