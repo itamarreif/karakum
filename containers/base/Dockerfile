@@ -47,9 +47,10 @@ RUN set -eux; \
     fi; \
     useradd -m -u ${HOST_UID} -g ${HOST_GID} -s /bin/bash agent
 
-# Clean, host-distinct interactive prompt (appended so it wins over skel's PS1).
-COPY prompt.bashrc /tmp/kk-prompt.bashrc
-RUN cat /tmp/kk-prompt.bashrc >> /home/agent/.bashrc && rm /tmp/kk-prompt.bashrc
+# Replace the verbose Debian skel ~/.bashrc with a tight one (history + ls
+# colors + completion + the clean, host-distinct karakum prompt).
+COPY bashrc /home/agent/.bashrc
+RUN chown agent:agent /home/agent/.bashrc
 
 # Entrypoint renames the `agent` account to the launching agent and drops to it.
 # The image therefore stays root by default (no `USER agent`); the entrypoint is
