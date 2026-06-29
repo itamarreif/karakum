@@ -16,7 +16,7 @@ app.
 ```
 Justfile recipe          →  shell command
 ─────────────────────────────────────────────────────────────
-just build               →  bash scripts/build.sh          (Docker images; not Python)
+just build               →  uv run karakum build           (Docker images)
 just install             →  uv pip install -e .            (install the CLI)
 just claude A [S] [P]     →  uv run karakum launch claude A S P claude
 just shell  A [S] [P]     →  uv run karakum launch claude A S P bash
@@ -34,7 +34,7 @@ karakum/
   __init__.py     Empty — marks the package.
   __main__.py     `python -m karakum` shim: imports cli.main and calls it.
   cli.py          The Click app. Defines `main` group + commands:
-                  launch / agents / projects / session (group: ls, rm).
+                  launch / build / agents / projects / session (group: ls, rm).
                   `sessions` is an alias for `session ls`. Orchestrates
                   everything; ends `launch` by exec'ing `docker compose run`.
   manifest.py     YAML manifest I/O + location resolvers. karakum_root()
@@ -90,6 +90,7 @@ uv run karakum <command> ...
    ▼
 karakum.cli:main            (click.Group)
    ├── launch   ◄── just claude / just shell
+   ├── build    ◄── just build
    ├── agents   ◄── just agents
    ├── projects ◄── just projects
    ├── sessions ◄── just sessions   (alias for session ls)

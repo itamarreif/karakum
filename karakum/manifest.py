@@ -38,6 +38,12 @@ def project_path(name: str) -> Path:
     return config_dir() / "projects" / f"{name}.yaml"
 
 
+def toolchains_path() -> Path:
+    """toolchains.yaml: config-dir override if present, else the repo default."""
+    override = config_dir() / "toolchains.yaml"
+    return override if override.exists() else karakum_root() / "toolchains.yaml"
+
+
 def require(path: Path) -> None:
     if not path.exists():
         print(f"karakum: no manifest at {path}", file=sys.stderr)

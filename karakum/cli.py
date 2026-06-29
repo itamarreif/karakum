@@ -291,6 +291,58 @@ def projects():
         print(f"{name}\t{proj_path}\t{repo}")
 
 
+@main.command("build")
+def build():
+    """Build base + toolchain + agent images in tiered order.
+
+    Tiers: base → toolchain-<lang> (thin wrappers over the canonical upstream
+    images) → agent images (via `docker compose build`, which COPY --from each
+    toolchain). Versions and per-toolchain tool lists come from toolchains.yaml
+    (a copy in the config dir overrides the repo default per-host).
+    """
+    preflight.check_tools()
+    root = manifest.karakum_root()
+    tc = manifest.load(manifest.toolchains_path())
+
+    node_version   = manifest.get(tc, "node.version")
+    node_tools     = " ".join(manifest.get(tc, "node.tools") or [])
+    python_version = manifest.get(tc, "python.version")
+    uv_version     = manifest.get(tc, "python.uv_version")
+    rust_version   = manifest.get(tc, "rust.version")
+    rust_tools     = " ".join(manifest.get(tc, "rust.tools") or [])
+
+    def run(cmd: list[str]) -> None:
+        try:
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"karakum: build failed ({' '.join(cmd)})", file=sys.stderr)
+            raise SystemExit(e.returncode)
+
+    print("karakum: building base image", file=sys.stderr)
+    run(["docker", "build", "-t", "karakum-base:latest",
+         "--build-arg", f"HOST_UID={os.getuid()}",
+         "--build-arg", f"HOST_GID={os.getgid()}",
+         str(root / "containers/base")])
+
+    print("karakum: building toolchain images", file=sys.stderr)
+    run(["docker", "build",
+         "--build-arg", f"NODE_VERSION={node_version}",
+         "--build-arg", f"NODE_TOOLS={node_tools}",
+         "-t", "karakum-toolchain-node:latest", str(root / "containers/toolchain-node")])
+    run(["docker", "build",
+         "--build-arg", f"PYTHON_VERSION={python_version}",
+         "--build-arg", f"UV_VERSION={uv_version}",
+         "-t", "karakum-toolchain-python:latest", str(root / "containers/toolchain-python")])
+    run(["docker", "build",
+         "--build-arg", f"RUST_VERSION={rust_version}",
+         "--build-arg", f"RUST_TOOLS={rust_tools}",
+         "-t", "karakum-toolchain-rust:latest", str(root / "containers/toolchain-rust")])
+
+    print("karakum: building agent images via compose", file=sys.stderr)
+    os.chdir(root)
+    run(["docker", "compose", "build"])
+
+
 # ---------------------------------------------------------------------------
 # session command group
 # ---------------------------------------------------------------------------

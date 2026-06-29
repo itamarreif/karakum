@@ -2,7 +2,7 @@
 # Each entry maps to a containers/toolchain-<name>/Dockerfile which is a thin
 # wrapper over the canonical upstream image for that tool, plus the standard
 # companion tools for that ecosystem (uv for python, tsc/pnpm for node).
-# Bumping a version or adding a tool here + re-running scripts/build.sh is the
+# Bumping a version or adding a tool here + re-running `karakum build` is the
 # only step needed.
 
 node:
@@ -14,3 +14,6 @@ node:
 python:
   version: "3.13"
   uv_version: "0.5.11"
+
+rust:
+  version: "1.96.0"

@@ -79,7 +79,7 @@ get deleted often and you want them easy to find and wipe — not buried under
 | `agents/<name>.yaml` | An agent identity: `name`, `memory.path` (local memory repo), `memory.repository` (canonical remote; preflight verifies the local `origin` matches). Loaded by `manifest.load`. |
 | `projects/<name>.yaml` | A project the agent acts on: `name`, `path`, `repository`. Same preflight check. |
 | `secrets.yaml` | A `secrets:` map of env-var name → URI reference (`op://…`, `env://…`). References only — the launcher resolves each at session start and injects `-e VAR` (name only) into the container; values never touch argv or disk. See `secrets.py` for providers. |
-| `toolchains.yaml` | Toolchain versions + per-ecosystem tools, read by `scripts/build.sh` (via `yq`). The repo ships a default; a copy in the config dir overrides it per-host. |
+| `toolchains.yaml` | Toolchain versions + per-ecosystem tools, read by `karakum build`. The repo ships a default; a copy in the config dir overrides it per-host. |
 
 Inside the **data dir**:
 
