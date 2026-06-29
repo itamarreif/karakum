@@ -67,6 +67,10 @@ touches secrets.
    name: <name>
    path: ~/code/you/<repo>
    repository: github.com/you/<repo>
+   # clean:  (optional) overrides `session clean` autodetect for this project,
+   #         e.g. a monorepo with a nested package:
+   #   - cargo clean
+   #   - cd webapp && npm run clean --if-present && rm -rf node_modules .next
    ```
 3. Verify: `karakum projects` (or `just projects`).
 4. Use it: `just claude <agent> <slug> <name>`.

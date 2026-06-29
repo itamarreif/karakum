@@ -138,11 +138,13 @@ Multiple terminals can open the **same slug** concurrently; each gets a unique c
 
 ### Listing & cleaning up sessions
 
-Session clones persist after the container exits, so they accumulate. Two commands manage them:
+Session clones persist after the container exits, so they accumulate. Four commands manage them:
 
 ```sh
-just sessions [<agent>]                  # list session clones + status (one row per clone)
-just session-rm <slug> [--dry-run] [--yes]  # delete a session directory
+just sessions [<agent>]                      # list session clones + status (one row per clone)
+just session-rm <slug> [--dry-run] [--yes]   # delete a session directory
+just session-clean <slug> [--dry-run]        # free build artifacts (target/, node_modules, …) without deleting the clone
+just session-down <slug> [--yes]             # stop a stuck session's container(s) without deleting the clone
 ```
 
 `just sessions` (alias: `karakum session ls`) prints one row per clone:
@@ -158,6 +160,10 @@ The branch column folds in dirty/unpushed state and PR number. The pr-state colu
 `just session-rm <slug>` (alias: `karakum session rm <slug>`) deletes the entire session directory and reaps any exited `agent-<agent>-<slug>-*` containers. If the slug matches clones under multiple agents it prints them and asks you to disambiguate.
 
 Flags: `--dry-run` (show what would be removed, delete nothing), `--yes` (skip the confirmation prompt).
+
+`just session-clean <slug>` reclaims disk **without** deleting the clone — handy when several sessions fill the disk and `session-rm` is too destructive for in-progress work. It runs each toolchain's clean command inside the agent image over the session's clones (so `cargo`/`npm`/`uv` are available), removing only regenerable build artifacts — source and git state are untouched. For each clone, a project that declares a `clean:` list in its manifest runs exactly those commands; otherwise every toolchain in `toolchains.yaml` whose `detect` command succeeds (e.g. `test -f Cargo.toml`) runs its `clean` (e.g. `cargo clean`). Use a project `clean:` for monorepos whose build dirs are nested (e.g. `cd webapp && npm run clean …`), since autodetect only checks the clone root. `--dry-run` prints the generated script and docker command without running anything. (Requires `just build` first, so the `karakum-agent-claude` image exists.)
+
+`just session-down <slug>` stops the running `agent-<agent>-<slug>-*` container(s) — for killing a stuck or runaway session (e.g. a type-checker spinning for too long) — without deleting the clone. Containers run with `--rm`, so stopping them removes them. Confirms first; `--yes` skips the prompt.
 
 Invoke from anywhere with a shell alias:
 

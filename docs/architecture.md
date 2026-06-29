@@ -5,6 +5,8 @@ How the Python CLI is structured and what happens on each `just` invocation.
 > Keep this in sync with the code. When you change `karakum/cli.py`'s flow, the
 > module split, the docker handoff, or the session/mount contract, update the
 > matching section here in the same PR.
+>
+> For how this code is tested, see [testing.md](testing.md).
 
 ## Entry points
 
@@ -24,6 +26,8 @@ just agents              →  uv run karakum agents
 just projects            →  uv run karakum projects
 just sessions [A]        →  uv run karakum session ls A    (alias: karakum sessions)
 just session-rm S [..]   →  uv run karakum session rm S ..
+just session-clean S [..]→  uv run karakum session clean S ..  (free build artifacts)
+just session-down S [..] →  uv run karakum session down S ..   (stop a stuck container)
 just (default)           →  just --list
 ```
 
@@ -34,9 +38,10 @@ karakum/
   __init__.py     Empty — marks the package.
   __main__.py     `python -m karakum` shim: imports cli.main and calls it.
   cli.py          The Click app. Defines `main` group + commands:
-                  launch / build / agents / projects / session (group: ls, rm).
-                  `sessions` is an alias for `session ls`. Orchestrates
-                  everything; ends `launch` by exec'ing `docker compose run`.
+                  launch / build / agents / projects / session (group: ls,
+                  rm, clean, down). `sessions` is an alias for `session ls`.
+                  Orchestrates everything; ends `launch` by exec'ing
+                  `docker compose run`.
   manifest.py     YAML manifest I/O + location resolvers. karakum_root()
                   (the checkout), config_dir() ($KARAKUM_CONFIG_DIR, default
                   ~/.config/karakum), data_dir() ($KARAKUM_DATA_DIR, default
@@ -59,12 +64,16 @@ karakum/
                   / state_root() → where session clones / harness state live
                   (default <data_dir>/sessions and <data_dir>/state, so
                   $KARAKUM_DATA_DIR relocates both).
-  cleanup.py      Session enumeration + remove. iter_sessions() scans
+  cleanup.py      Session enumeration + remove + container control.
+                  iter_sessions() scans
                   <sessions_root>/<agent>/<slug>/<label> (real-clone guard);
                   Clone is a frozen dataclass; clone_status() returns dirty +
                   unpushed via parallel ThreadPoolExecutor; pr_states() batches
                   gh calls per repo; remove() rmtree's the session dir + reaps
                   exited agent-<agent>-<slug>-* containers.
+                  running_containers()/stop_containers() find + `docker stop`
+                  the *running* agent-<agent>-<slug>-* containers (for
+                  `session down`).
   secrets.py      Pluggable secret resolution. load() reads the host-wide
                   <config_dir>/secrets.yaml `.secrets` map, dispatches each URI by
                   scheme to a provider (op:// → 1Password, env:// → host env),
@@ -95,9 +104,15 @@ karakum.cli:main            (click.Group)
    ├── projects ◄── just projects
    ├── sessions ◄── just sessions   (alias for session ls)
    └── session  ◄── (group)
-         ├── ls ◄── just sessions
-         └── rm ◄── just session-rm
+         ├── ls    ◄── just sessions
+         ├── rm    ◄── just session-rm
+         ├── clean ◄── just session-clean
+         └── down  ◄── just session-down
 ```
+
+All three of `rm` / `clean` / `down` resolve their `<slug>` argument through the
+shared `_resolve_session()` helper, so they share identical no-match and
+multi-agent-collision errors.
 
 `agents` / `projects` just glob the manifest dir and print a TSV:
 
@@ -120,6 +135,42 @@ session_ls(agent?)                        session_rm(slug, --dry-run, --yes)
    └─ pr_states() batched per repo (gh)      └─ confirm (unless --yes) → cleanup.remove(s)
    └─ print(agent slug label branch                (rmtree session dir + reap exited containers)
             pr-state)
+```
+
+`session clean` frees build artifacts without touching source or git state. It
+runs inside the bundled agent image (`karakum-agent-claude:latest`, so cargo /
+npm / uv are present) over the session's host-mounted clones:
+
+```
+session_clean(slug, --dry-run)
+   ├─ _resolve_session(slug)
+   ├─ _clean_builtins(toolchains.yaml)   → [(detect, clean), …] per toolchain
+   ├─ _project_clean_map()               → {clone-label: [custom cmd, …]} from projects/*.yaml
+   ├─ _clean_script(clones, builtins, custom)
+   │     per clone under /work/<label> (set +e, each in a subshell):
+   │       • custom commands if the label has them (overrides autodetect), ELSE
+   │       • each builtin guarded by `if <detect>; then ( <clean> ); fi`
+   ├─ --dry-run → print the docker cmd + script; stop
+   ├─ require image (docker image inspect; else "run `karakum build`")
+   └─ docker run --rm -v <session.path>:/work -w /work <image> bash -c <script>
+```
+
+Per-clone, a project's custom `clean:` and toolchain autodetect are **mutually
+exclusive** — a project declaring `clean:` fully replaces autodetect for its
+clone (used for monorepos whose relevant package is nested and root-only
+autodetect can't reach). The scratchpad/memory clone never maps to a project, so
+it always takes the autodetect path.
+
+`session down` kills a stuck/runaway session's container(s) without removing the
+clone:
+
+```
+session_down(slug, --yes)
+   ├─ _resolve_session(slug)
+   ├─ cleanup.running_containers(agent, slug)   → running agent-<agent>-<slug>-* names
+   ├─ none → "no running containers"; stop
+   ├─ confirm (unless --yes)
+   └─ cleanup.stop_containers(names)            → docker stop (compose --rm auto-removes)
 ```
 
 ## `launch` flow (the main path)

@@ -6,7 +6,16 @@
 #   name        - identifier (matches the file basename)
 #   path        - local path to the project's git repo
 #   repository  - canonical remote; preflight verifies local origin matches
+#   clean       - (optional) commands `karakum session clean` runs for this
+#                 project's clone instead of toolchain autodetect. Use this for
+#                 monorepos / nested packages autodetect (root-only) can't reach.
+#                 Each runs from the clone root, tolerant of failure.
 
 name: example
 path: ~/code/you/your-repo
 repository: github.com/you/your-repo
+
+# Example for a Rust + nested Next.js monorepo (overrides autodetect):
+# clean:
+#   - cargo clean
+#   - cd webapp && npm run clean --if-present && rm -rf node_modules .next

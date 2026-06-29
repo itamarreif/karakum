@@ -23,9 +23,13 @@ build:
 install:
     uv pip install -e .
 
-# Run the unit test suite.
+# Run the unit test suite (offline, no Docker).
 test:
     uv run --group dev pytest
+
+# Live Docker smoke test for session clean/down (needs `just build` first).
+smoke:
+    bash tests/smoke.sh
 
 # Run Claude Code: just claude <agent> [<session>] [<project>]
 claude agent session="-" project="-":
@@ -55,3 +59,11 @@ sessions agent="":
 # Remove a session directory: just session-rm <slug> [--dry-run] [--yes]
 session-rm slug *flags:
     uv run karakum session rm {{slug}} {{flags}}
+
+# Free disk: run each toolchain's clean in the session's clones. just session-clean <slug> [--dry-run]
+session-clean slug *flags:
+    uv run karakum session clean {{slug}} {{flags}}
+
+# Stop running containers for a stuck session: just session-down <slug> [--yes]
+session-down slug *flags:
+    uv run karakum session down {{slug}} {{flags}}

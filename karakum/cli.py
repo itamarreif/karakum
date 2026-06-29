@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,11 @@ from karakum import session as ksession
 # ~/<repo-name>. Matches the home of the baked `agent` account (renamed to the
 # launching agent at runtime by the image entrypoint).
 CONTAINER_HOME = "/home/agent"
+
+# The bundled agent image (built by `karakum build` via `docker compose build`,
+# tagged from docker-compose.yaml's `image:`). `session clean` runs over a
+# session's clones inside this image so every toolchain's clean tool is present.
+CLAUDE_IMAGE = "karakum-agent-claude:latest"
 
 
 def _git_identity_args(agent: str) -> list[str]:
@@ -353,6 +359,92 @@ def session_group():
     pass
 
 
+def _resolve_session(slug: str) -> "cleanup.Session":
+    """Find the one session matching `slug`, or raise a click error.
+
+    Shared by rm/clean/down so they have identical no-match / multi-agent
+    semantics (a slug can collide across agents).
+    """
+    matches = [s for s in cleanup.iter_sessions() if s.slug == slug]
+    if not matches:
+        raise click.ClickException(f"no session with slug '{slug}'")
+    if len(matches) > 1:
+        lines = "\n".join(f"  {s.agent}/{s.slug}  {s.path}" for s in matches)
+        raise click.ClickException(
+            f"slug '{slug}' matches sessions under multiple agents:\n{lines}\n"
+            f"Use 'karakum session ls' to review, then remove the specific clone directory manually."
+        )
+    return matches[0]
+
+
+def _as_list(v) -> list[str]:
+    """Normalize a YAML scalar-or-list into a list of strings."""
+    return [v] if isinstance(v, str) else list(v)
+
+
+def _clean_builtins(tc: dict) -> list[tuple[str, str]]:
+    """(detect, clean) pairs from toolchains.yaml for entries that define `clean`.
+
+    `detect` defaults to `true` (run unconditionally) when absent. Non-dict
+    top-level values and entries without `clean` are skipped.
+    """
+    out: list[tuple[str, str]] = []
+    for spec in tc.values():
+        if isinstance(spec, dict) and (clean := spec.get("clean")):
+            detect = (spec.get("detect") or "true").strip()
+            out.append((detect, clean.strip()))
+    return out
+
+
+def _clean_map_from_projects(projects: list[dict]) -> dict[str, list[str]]:
+    """Map clone label (repo basename) -> custom clean commands, from project dicts.
+
+    The key matches the clone label `session.ensure` derives from the manifest's
+    `repository` (its last path segment), so a session's project clone can look
+    up its override. Projects without `clean` are omitted.
+    """
+    out: dict[str, list[str]] = {}
+    for data in projects:
+        if not (clean := data.get("clean")):
+            continue
+        repo = (data.get("repository") or "").rstrip("/")
+        label = repo.split("/")[-1] if repo else (data.get("name") or "")
+        if label:
+            out[label] = _as_list(clean)
+    return out
+
+
+def _project_clean_map() -> dict[str, list[str]]:
+    """Load every projects/*.yaml and build the label -> custom-clean map."""
+    projects_dir = manifest.config_dir() / "projects"
+    if not projects_dir.is_dir():
+        return {}
+    return _clean_map_from_projects([manifest.load(p) for p in sorted(projects_dir.glob("*.yaml"))])
+
+
+def _clean_script(clones, builtins: list[tuple[str, str]],
+                  custom_by_label: dict[str, list[str]]) -> str:
+    """Build the tolerant bash script that cleans each clone under /work/<label>.
+
+    A clone whose label has custom commands runs only those; otherwise the
+    autodetect `builtins` run, each guarded by its detect command. Everything is
+    in a subshell under `set +e`, so a failing detect / missing dir / missing npm
+    script never aborts the rest of the run.
+    """
+    lines = ["set +e"]
+    for clone in clones:
+        q = shlex.quote(f"/work/{clone.label}")
+        lines.append(f"echo {shlex.quote('karakum: cleaning ' + clone.label)} >&2")
+        custom = custom_by_label.get(clone.label)
+        if custom:
+            for cmd in custom:
+                lines.append(f"( cd {q} && ( {cmd} ) )")
+        else:
+            for detect, clean in builtins:
+                lines.append(f"( cd {q} && if {detect}; then ( {clean} ); fi )")
+    return "\n".join(lines)
+
+
 @session_group.command("ls")
 @click.argument("agent", required=False)
 def session_ls(agent):
@@ -397,20 +489,7 @@ def session_ls(agent):
 @click.option("--yes", is_flag=True, help="Skip the confirmation prompt.")
 def session_rm(slug, dry_run, yes):
     """Delete a session directory and reap its containers."""
-    all_sessions = cleanup.iter_sessions()
-    matches = [s for s in all_sessions if s.slug == slug]
-
-    if not matches:
-        raise click.ClickException(f"no session with slug '{slug}'")
-
-    if len(matches) > 1:
-        lines = "\n".join(f"  {s.agent}/{s.slug}  {s.path}" for s in matches)
-        raise click.ClickException(
-            f"slug '{slug}' matches sessions under multiple agents:\n{lines}\n"
-            f"Use 'karakum session ls' to review, then remove the specific clone directory manually."
-        )
-
-    session = matches[0]
+    session = _resolve_session(slug)
     target = f"{session.agent}/{session.slug}  ({session.path})"
 
     if dry_run:
@@ -423,6 +502,73 @@ def session_rm(slug, dry_run, yes):
 
     cleanup.remove(session)
     print(f"removed {session.agent}/{session.slug}")
+
+
+@session_group.command("clean")
+@click.argument("slug")
+@click.option("--dry-run", is_flag=True, help="Print the clean script and docker command; run nothing.")
+def session_clean(slug, dry_run):
+    """Free disk by running each toolchain's clean over a session's clones.
+
+    For every clone: a project that declares `clean:` in its manifest runs those
+    commands; otherwise each toolchain in toolchains.yaml whose `detect` succeeds
+    runs its `clean`. Runs inside the agent image (so cargo/npm/uv are present),
+    over the host-mounted clones. Only build/dependency artifacts are removed —
+    source and git state are untouched.
+    """
+    session = _resolve_session(slug)
+    builtins = _clean_builtins(manifest.load(manifest.toolchains_path()))
+    custom_by_label = _project_clean_map()
+
+    if not builtins and not any(c.label in custom_by_label for c in session.clones):
+        print("karakum: no clean commands configured", file=sys.stderr)
+        return
+
+    script = _clean_script(session.clones, builtins, custom_by_label)
+    docker_cmd = [
+        "docker", "run", "--rm",
+        "-v", f"{session.path}:/work",
+        "-w", "/work",
+        CLAUDE_IMAGE,
+        "bash", "-c", script,
+    ]
+
+    if dry_run:
+        print(" ".join(shlex.quote(a) for a in docker_cmd))
+        return
+
+    # The image is built by `karakum build`; `docker run` can't build it on demand.
+    if subprocess.run(["docker", "image", "inspect", CLAUDE_IMAGE],
+                      capture_output=True, text=True).returncode != 0:
+        raise click.ClickException(f"image {CLAUDE_IMAGE} not found — run `karakum build` first")
+
+    subprocess.run(docker_cmd)
+    print(f"cleaned {session.agent}/{session.slug}")
+
+
+@session_group.command("down")
+@click.argument("slug")
+@click.option("--yes", is_flag=True, help="Skip the confirmation prompt.")
+def session_down(slug, yes):
+    """Stop the running container(s) for a session (to kill a stuck one).
+
+    Does not remove the session clone — use `session rm` for that. Containers run
+    with `--rm`, so stopping them removes them.
+    """
+    session = _resolve_session(slug)
+    names = cleanup.running_containers(session.agent, session.slug)
+    if not names:
+        print(f"karakum: no running containers for {session.agent}/{session.slug}", file=sys.stderr)
+        return
+
+    listed = "\n".join(f"  {n}" for n in names)
+    print(f"running containers for {session.agent}/{session.slug}:\n{listed}")
+    if not yes and not click.confirm(f"Stop {len(names)} container(s)?"):
+        print("karakum: aborted", file=sys.stderr)
+        return
+
+    cleanup.stop_containers(names)
+    print(f"stopped {len(names)} container(s)")
 
 
 # backward-compat alias: `karakum sessions` still works

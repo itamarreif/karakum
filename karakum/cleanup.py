@@ -135,6 +135,26 @@ def remove(session: Session) -> None:
     _reap_containers(session)
 
 
+def running_containers(agent: str, slug: str) -> list[str]:
+    """Names of *running* `agent-<agent>-<slug>-*` containers for a session.
+
+    Distinct from `_reap_containers`, which targets `status=exited` leftovers:
+    this finds the live containers a stuck session is holding, for `session down`
+    to `docker stop`. Same name-prefix filter used by `pngpaste`/`_reap_containers`.
+    """
+    r = subprocess.run(
+        ["docker", "ps", "--filter", f"name=agent-{agent}-{slug}-", "--format", "{{.Names}}"],
+        capture_output=True, text=True,
+    )
+    return r.stdout.split()
+
+
+def stop_containers(names: list[str]) -> None:
+    """`docker stop` the given containers (compose `--rm` auto-removes them)."""
+    if names:
+        subprocess.run(["docker", "stop", *names], capture_output=True, text=True)
+
+
 def _reap_containers(session: Session) -> None:
     """Best-effort removal of exited `agent-<agent>-<slug>-*` containers."""
     name_prefix = f"agent-{session.agent}-{session.slug}-"
