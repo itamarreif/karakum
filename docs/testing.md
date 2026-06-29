@@ -3,8 +3,9 @@
 How we test karakum, and where the line between automated and manual sits. Keep
 this in sync with `tests/` — when a new pattern proves useful, record it here.
 
-Run the suite with `just test` (`uv run --group dev pytest`). It is offline and
-fast (sub-second); it must stay that way.
+Run the offline suite with `just test` (`uv run --group dev pytest`). It is
+offline and fast (sub-second); it must stay that way. The Docker-backed
+integration check is separate: `just smoke` (see §6).
 
 ## 1. Offline-first — no Docker, no network, no clock
 
@@ -67,11 +68,17 @@ behaves — not just that the string looks right:
   loudly — e.g. every entry in `toolchains.yaml` defines both `detect` and
   `clean`. Load the *repo default* (`manifest.karakum_root()/...`), not the
   config-dir override.
-- **Manual/live QA.** Anything needing Docker, a built image, dep installs, or
-  container lifecycle goes in the tracking issue as a numbered, copy-pasteable
-  checklist (what to run, what to observe) — see
-  `session clean`/`down` in the scratchpad issue. Treat that checklist as the
-  spec for the part the unit suite can't reach.
+- **Live smoke test.** Anything needing Docker, a built image, or container
+  lifecycle belongs in `just smoke` (`tests/smoke.sh`), not pytest. The smoke
+  test must be **self-contained and idempotent**: point `KARAKUM_DATA_DIR` /
+  `KARAKUM_CONFIG_DIR` at temp dirs, build its own throwaway session tree and
+  container, assert on real effects (artifacts gone, source intact, container
+  stopped), and clean up via a `trap … EXIT`. It fails loud with a clear message
+  when the image is missing (`run \`just build\` first`). It is **not** part of
+  `just test` — it needs a host with Docker and a multi-GB image, so it stays an
+  explicit, on-demand check. Anything `just smoke` still can't cover (e.g. the
+  full `just claude` launch path with real auth) stays a numbered manual
+  checklist in the tracking issue.
 
 ## Conventions
 

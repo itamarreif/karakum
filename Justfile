@@ -23,9 +23,13 @@ build:
 install:
     uv pip install -e .
 
-# Run the unit test suite.
+# Run the unit test suite (offline, no Docker).
 test:
     uv run --group dev pytest
+
+# Live Docker smoke test for session clean/down (needs `just build` first).
+smoke:
+    bash tests/smoke.sh
 
 # Run Claude Code: just claude <agent> [<session>] [<project>]
 claude agent session="-" project="-":
