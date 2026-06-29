@@ -255,7 +255,7 @@ def test_clean_script_is_valid_bash_with_tricky_labels_and_cmds():
 
 def test_shipped_toolchains_define_detect_and_clean():
     from karakum import manifest
-    tc = manifest.load(manifest.karakum_root() / "toolchains.yaml")
+    tc = manifest.load(manifest.karakum_root() / "examples" / "toolchains.yaml")
     assert tc, "toolchains.yaml is empty"
     for name, spec in tc.items():
         assert isinstance(spec, dict), f"{name} is not a mapping"

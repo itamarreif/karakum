@@ -303,8 +303,8 @@ def build():
 
     Tiers: base → toolchain-<lang> (thin wrappers over the canonical upstream
     images) → agent images (via `docker compose build`, which COPY --from each
-    toolchain). Versions and per-toolchain tool lists come from toolchains.yaml
-    (a copy in the config dir overrides the repo default per-host).
+    toolchain). Versions and per-toolchain tool lists come from the config dir's
+    toolchains.yaml (host-owned; seed it from examples/toolchains.yaml).
     """
     preflight.check_tools()
     root = manifest.karakum_root()
@@ -314,8 +314,9 @@ def build():
     node_tools     = " ".join(manifest.get(tc, "node.tools") or [])
     python_version = manifest.get(tc, "python.version")
     uv_version     = manifest.get(tc, "python.uv_version")
-    rust_version   = manifest.get(tc, "rust.version")
-    rust_tools     = " ".join(manifest.get(tc, "rust.tools") or [])
+    rust_version    = manifest.get(tc, "rust.version")
+    rust_tools      = " ".join(manifest.get(tc, "rust.tools") or [])
+    rust_components = " ".join(manifest.get(tc, "rust.components") or [])
 
     def run(cmd: list[str]) -> None:
         try:
@@ -342,6 +343,7 @@ def build():
     run(["docker", "build",
          "--build-arg", f"RUST_VERSION={rust_version}",
          "--build-arg", f"RUST_TOOLS={rust_tools}",
+         "--build-arg", f"RUST_COMPONENTS={rust_components}",
          "-t", "karakum-toolchain-rust:latest", str(root / "containers/toolchain-rust")])
 
     print("karakum: building agent images via compose", file=sys.stderr)

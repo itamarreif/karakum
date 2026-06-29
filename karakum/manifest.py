@@ -39,9 +39,8 @@ def project_path(name: str) -> Path:
 
 
 def toolchains_path() -> Path:
-    """toolchains.yaml: config-dir override if present, else the repo default."""
-    override = config_dir() / "toolchains.yaml"
-    return override if override.exists() else karakum_root() / "toolchains.yaml"
+    """toolchains.yaml from the config dir (host-owned; seed from examples/)."""
+    return config_dir() / "toolchains.yaml"
 
 
 def require(path: Path) -> None:

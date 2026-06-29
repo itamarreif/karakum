@@ -7,6 +7,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       bash \
+      build-essential \
       ca-certificates \
       curl \
       fzf \
@@ -16,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       less \
       ncurses-term \
       openssh-client \
+      pkg-config \
       ripgrep \
       util-linux \
     && rm -rf /var/lib/apt/lists/*

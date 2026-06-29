@@ -1,9 +1,12 @@
-# Single source of truth for toolchain versions + per-ecosystem tooling.
-# Each entry maps to a containers/toolchain-<name>/Dockerfile which is a thin
-# wrapper over the canonical upstream image for that tool, plus the standard
-# companion tools for that ecosystem (uv for python, tsc/pnpm for node).
-# Bumping a version or adding a tool here + re-running `karakum build` is the
-# only step needed.
+# Seed copy of toolchains.yaml. Copy into the config dir ($KARAKUM_CONFIG_DIR,
+# default ~/.config/karakum) — that copy is what `karakum build` and
+# `karakum session clean` read; editing this file in the repo has no effect.
+#
+# Defines toolchain versions + per-ecosystem tooling. Each entry maps to a
+# containers/toolchain-<name>/Dockerfile which is a thin wrapper over the
+# canonical upstream image for that tool, plus the standard companion tools for
+# that ecosystem (uv for python, tsc/pnpm for node). Bumping a version or adding
+# a tool/component here + re-running `karakum build` is the only step needed.
 #
 # `detect` + `clean` drive `karakum session clean`: for each session clone,
 # every toolchain whose `detect` command exits 0 (run from the clone root) has
@@ -29,5 +32,10 @@ python:
 
 rust:
   version: "1.96.0"
+  # rustup components — the slim base image ships the `minimal` profile, so these
+  # are absent by default and `cargo clippy` / `cargo fmt` fail without them.
+  components:
+    - clippy
+    - rustfmt
   detect: "test -f Cargo.toml"
   clean: "cargo clean"

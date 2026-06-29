@@ -16,13 +16,12 @@ karakum keeps three kinds of files apart, split by lifecycle:
 ```
 # REPO (the karakum checkout) — version-controlled, generic, shareable
 karakum/  containers/  docker-compose.yaml  scripts/  Justfile
-toolchains.yaml          # DEFAULT toolchain versions (overridable per-host)
 examples/                # genericized sample config to copy into the config dir
 pyproject.toml  docs/  README.md
 
 # CONFIG ($KARAKUM_CONFIG_DIR, default ~/.config/karakum) — small, durable, lives in dotfiles
 config.yaml              # global settings (sessions_root, state_root, cleanup)
-toolchains.yaml          # optional per-host override of the repo default
+toolchains.yaml          # toolchain versions + components (seed from examples/)
 agents/<name>.yaml       # per-agent: memory repo path + canonical remote
 projects/<name>.yaml     # per-project: repo path + canonical remote
 secrets.yaml             # secret references only (op:// / env://), never values
@@ -79,7 +78,7 @@ get deleted often and you want them easy to find and wipe — not buried under
 | `agents/<name>.yaml` | An agent identity: `name`, `memory.path` (local memory repo), `memory.repository` (canonical remote; preflight verifies the local `origin` matches). Loaded by `manifest.load`. |
 | `projects/<name>.yaml` | A project the agent acts on: `name`, `path`, `repository`. Same preflight check. Optional `clean:` (a command or list) overrides toolchain autodetect for this project's clone in `session clean` — use it for monorepos with nested packages. |
 | `secrets.yaml` | A `secrets:` map of env-var name → URI reference (`op://…`, `env://…`). References only — the launcher resolves each at session start and injects `-e VAR` (name only) into the container; values never touch argv or disk. See `secrets.py` for providers. |
-| `toolchains.yaml` | Toolchain versions + per-ecosystem tools (read by `karakum build`) plus a `detect`/`clean` command pair per toolchain (read by `session clean` to free build artifacts). The repo ships a default; a copy in the config dir overrides it per-host. |
+| `toolchains.yaml` | Toolchain versions + per-ecosystem tools and components (read by `karakum build`) plus a `detect`/`clean` command pair per toolchain (read by `session clean` to free build artifacts). Host-owned (config-dir-only, like agents/projects); seed it from `examples/toolchains.yaml`. |
 
 Inside the **data dir**:
 
@@ -98,11 +97,12 @@ karakum ships sample config under `examples/`. To set up a host:
 
 ```bash
 mkdir -p ~/.config/karakum
-cp -r examples/agents examples/projects examples/secrets.yaml ~/.config/karakum/
+cp -r examples/agents examples/projects examples/secrets.yaml examples/toolchains.yaml ~/.config/karakum/
 # then edit:
 #   agents/*.yaml    → your memory repo path + remote
 #   projects/*.yaml  → your project repo paths + remotes
 #   secrets.yaml     → your secret references
+#   toolchains.yaml  → toolchain versions + components (optional to edit)
 ```
 
 `secrets.yaml` examples default to `env://VAR` (portable — reads a host env var)
