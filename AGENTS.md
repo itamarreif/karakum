@@ -30,7 +30,7 @@ karakum/
     secrets.py              Secret resolution (op://, env://); pluggable providers.
     session.py              Per-session isolated clone lifecycle.
     cleanup.py              Session listing (iter_sessions, pr_states) + remove.
-  toolchains.yaml           Toolchain versions + per-ecosystem tools, read by `karakum build`.
+  examples/toolchains.yaml  Toolchain versions + components seed; copied into the config dir, read by `karakum build`.
   docker-compose.yaml       One service per toolchain.
   pyproject.toml            Python package definition; deps: click, pyyaml.
 ```

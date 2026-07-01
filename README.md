@@ -27,12 +27,11 @@ karakum splits its files across three locations, by lifecycle. Full model in
 ```
 # REPO (this checkout) — version-controlled, generic, shareable
 karakum/  containers/  docker-compose.yaml  scripts/  Justfile
-toolchains.yaml          Default toolchain versions (overridable per-host).
 examples/                Genericized sample config to copy into the config dir.
 
 # CONFIG ($KARAKUM_CONFIG_DIR, default ~/.config/karakum) — your settings, dotfiles-friendly
 config.yaml              Global settings (sessions_root, state_root, cleanup).
-toolchains.yaml          Optional per-host override of the repo default.
+toolchains.yaml          Toolchain versions + components (seed from examples/).
 agents/<name>.yaml       Agent identity: name + memory repo path + remote.
 projects/<name>.yaml     Workspace repos (path + repository).
 secrets.yaml             Host-wide secret references (op://…, env://…), never values.
@@ -53,8 +52,7 @@ version control. Within the data dir, `config.yaml` can redirect `sessions_root`
 ```
 karakum/
   containers/<toolchain>/   Docker images. Toolchain-specific.
-  examples/                 Sample agents/, projects/, secrets.yaml — copy into config dir.
-  toolchains.yaml           Default toolchain versions.
+  examples/                 Sample agents/, projects/, secrets.yaml, toolchains.yaml — copy into config dir.
   Justfile                  Host entry point — thin recipes dispatching to the CLI.
   karakum/                  Python CLI package (install with `just install`).
     cli.py                  Click entry point: launch, build, agents, projects, session group.
@@ -64,7 +62,6 @@ karakum/
     secrets.py              Secret resolution (op://, env://).
     session.py              Per-session isolated clone lifecycle.
     cleanup.py              Session enumeration + remove logic.
-  toolchains.yaml           Toolchain versions + tools, read by `karakum build`.
   docker-compose.yaml       One service per toolchain.
   docs/architecture.md      CLI structure + per-command call graphs.
   docs/configuration.md     The three-location config model.
@@ -92,11 +89,12 @@ samples in `examples/`, then edit:
 
 ```sh
 mkdir -p ~/.config/karakum
-cp -r examples/agents examples/projects examples/secrets.yaml ~/.config/karakum/
+cp -r examples/agents examples/projects examples/secrets.yaml examples/toolchains.yaml ~/.config/karakum/
 # then edit:
 #   ~/.config/karakum/agents/*.yaml    → your memory repo path + remote
 #   ~/.config/karakum/projects/*.yaml  → your project repo paths + remotes
 #   ~/.config/karakum/secrets.yaml     → your secret references
+#   ~/.config/karakum/toolchains.yaml  → toolchain versions + components (optional to edit)
 ```
 
 The sample `secrets.yaml` uses `env://VAR` references (portable — reads a host env

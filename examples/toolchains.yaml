@@ -1,0 +1,63 @@
+# Seed copy of toolchains.yaml. Copy into the config dir ($KARAKUM_CONFIG_DIR,
+# default ~/.config/karakum) — that copy is what `karakum build` and
+# `karakum session clean` read; editing this file in the repo has no effect.
+#
+# Defines toolchain versions + per-ecosystem tooling. Each entry maps to a
+# containers/toolchain-<name>/Dockerfile which is a thin wrapper over the
+# canonical upstream image for that tool, plus the standard companion tools for
+# that ecosystem (uv for python, tsc/pnpm for node). Bumping a version or adding
+# a tool/component here + re-running `karakum build` is the only step needed.
+#
+# `detect` + `clean` drive `karakum session clean`: for each session clone,
+# every toolchain whose `detect` command exits 0 (run from the clone root) has
+# its `clean` command run there to free build artifacts (target/, node_modules,
+# .venv, …). `detect` is a command (not a bare filename) so it can check a
+# lockfile, glob, or recurse. A project that needs different behaviour (e.g. a
+# nested package in a monorepo) sets `clean:` in its manifest, which replaces
+# this autodetect entirely for that clone.
+
+node:
+  version: "22.11.0"
+  tools:
+    - typescript
+    - pnpm
+  detect: "test -f package.json"
+  clean: "npm run clean --if-present"
+
+python:
+  version: "3.13"
+  uv_version: "0.5.11"
+  detect: "test -f pyproject.toml"
+  clean: "rm -rf .venv __pycache__ .pytest_cache .mypy_cache .ruff_cache"
+
+proto:
+  # protobuf toolchain: protoc (compiler + well-known-type includes) and buf
+  # (lint/codegen). Pinned to exact release tags — unlike an apt/`latest` grab,
+  # a rebuild won't silently move versions. No detect/clean: nothing to purge.
+  protoc:
+    version: "28.3"
+  buf:
+    version: "1.47.2"
+
+rust:
+  version: "1.96.0"
+  # rustup components — the slim base image ships the `minimal` profile, so these
+  # are absent by default and `cargo clippy` / `cargo fmt` fail without them.
+  # rustc-dev + llvm-tools are required by `cargo dylint` to compile lint crates
+  # against rustc internals (see the dylint tools below).
+  components:
+    - clippy
+    - rustfmt
+    - rustc-dev
+    - llvm-tools
+  # cargo subcommands installed from source (each is a `cargo install`, baked into
+  # the image — adds build time + a layer per tool, but present in every session).
+  tools:
+    - cargo-nextest
+    - cargo-audit
+    - cargo-watch
+    - sqlx-cli
+    - cargo-dylint
+    - dylint-link
+  detect: "test -f Cargo.toml"
+  clean: "cargo clean"

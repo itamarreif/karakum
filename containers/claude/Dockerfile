@@ -22,11 +22,24 @@ RUN ln -sf python3 /usr/local/bin/python
 # (cargo, rustc, rustup, ...) are proxies that dispatch to the real toolchain under
 # /usr/local/rustup. So copy both dirs and set CARGO_HOME/RUSTUP_HOME (the install
 # dirs are non-default, so the proxies can't find the toolchain without them).
-COPY --from=karakum-toolchain-rust:latest /usr/local/cargo  /usr/local/cargo
+#
+# CARGO_HOME is the registry/build cache cargo writes to at runtime, so it must be
+# owned by the `agent` account (uid/gid bake to the host's). Without --chown it
+# lands root-owned and the dropped-privilege user can't create registry/cache —
+# `cargo check` then dies with "Permission denied". RUSTUP_HOME is read-only at
+# runtime (toolchain dispatch only), so it can stay root-owned.
+COPY --from=karakum-toolchain-rust:latest --chown=agent:agent /usr/local/cargo /usr/local/cargo
 COPY --from=karakum-toolchain-rust:latest /usr/local/rustup /usr/local/rustup
 ENV CARGO_HOME=/usr/local/cargo \
     RUSTUP_HOME=/usr/local/rustup \
     PATH=/usr/local/cargo/bin:$PATH
+
+# --- protobuf (protoc + buf, from the proto toolchain image) ---
+# protoc needs its well-known-type includes (/usr/local/include/google/protobuf)
+# alongside the binary, or prost/tonic codegen can't resolve `import "google/..."`.
+COPY --from=karakum-toolchain-proto:latest /usr/local/bin/protoc      /usr/local/bin/protoc
+COPY --from=karakum-toolchain-proto:latest /usr/local/bin/buf         /usr/local/bin/buf
+COPY --from=karakum-toolchain-proto:latest /usr/local/include/google /usr/local/include/google
 
 # --- agent harness ---
 RUN npm install -g @anthropic-ai/claude-code

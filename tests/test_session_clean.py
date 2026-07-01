@@ -253,14 +253,21 @@ def test_clean_script_is_valid_bash_with_tricky_labels_and_cmds():
 
 # --- shipped toolchains.yaml guard -----------------------------------------
 
-def test_shipped_toolchains_define_detect_and_clean():
+def test_shipped_toolchains_clean_entries_have_detect():
+    """A toolchain that defines `clean` must guard it with `detect`.
+
+    Not every toolchain is cleanable — a version-only toolchain (e.g. `proto`,
+    which just stages protoc/buf binaries) legitimately defines neither, and
+    `_clean_builtins` skips entries without `clean`. But a `clean` without a
+    `detect` would run unconditionally on every clone, so that pairing is required.
+    """
     from karakum import manifest
-    tc = manifest.load(manifest.karakum_root() / "toolchains.yaml")
+    tc = manifest.load(manifest.karakum_root() / "examples" / "toolchains.yaml")
     assert tc, "toolchains.yaml is empty"
     for name, spec in tc.items():
         assert isinstance(spec, dict), f"{name} is not a mapping"
-        assert spec.get("detect"), f"{name} missing a detect command"
-        assert spec.get("clean"), f"{name} missing a clean command"
+        if spec.get("clean"):
+            assert spec.get("detect"), f"{name} defines clean but no detect guard"
 
 
 # --- _project_clean_map reading real files ---------------------------------
