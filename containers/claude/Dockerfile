@@ -34,6 +34,13 @@ ENV CARGO_HOME=/usr/local/cargo \
     RUSTUP_HOME=/usr/local/rustup \
     PATH=/usr/local/cargo/bin:$PATH
 
+# --- protobuf (protoc + buf, from the proto toolchain image) ---
+# protoc needs its well-known-type includes (/usr/local/include/google/protobuf)
+# alongside the binary, or prost/tonic codegen can't resolve `import "google/..."`.
+COPY --from=karakum-toolchain-proto:latest /usr/local/bin/protoc      /usr/local/bin/protoc
+COPY --from=karakum-toolchain-proto:latest /usr/local/bin/buf         /usr/local/bin/buf
+COPY --from=karakum-toolchain-proto:latest /usr/local/include/google /usr/local/include/google
+
 # --- agent harness ---
 RUN npm install -g @anthropic-ai/claude-code
 

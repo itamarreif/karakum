@@ -317,6 +317,8 @@ def build():
     rust_version    = manifest.get(tc, "rust.version")
     rust_tools      = " ".join(manifest.get(tc, "rust.tools") or [])
     rust_components = " ".join(manifest.get(tc, "rust.components") or [])
+    protoc_version  = manifest.get(tc, "proto.protoc.version")
+    buf_version     = manifest.get(tc, "proto.buf.version")
 
     def run(cmd: list[str]) -> None:
         try:
@@ -345,6 +347,10 @@ def build():
          "--build-arg", f"RUST_TOOLS={rust_tools}",
          "--build-arg", f"RUST_COMPONENTS={rust_components}",
          "-t", "karakum-toolchain-rust:latest", str(root / "containers/toolchain-rust")])
+    run(["docker", "build",
+         "--build-arg", f"PROTOC_VERSION={protoc_version}",
+         "--build-arg", f"BUF_VERSION={buf_version}",
+         "-t", "karakum-toolchain-proto:latest", str(root / "containers/toolchain-proto")])
 
     print("karakum: building agent images via compose", file=sys.stderr)
     os.chdir(root)

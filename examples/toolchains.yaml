@@ -30,12 +30,34 @@ python:
   detect: "test -f pyproject.toml"
   clean: "rm -rf .venv __pycache__ .pytest_cache .mypy_cache .ruff_cache"
 
+proto:
+  # protobuf toolchain: protoc (compiler + well-known-type includes) and buf
+  # (lint/codegen). Pinned to exact release tags — unlike an apt/`latest` grab,
+  # a rebuild won't silently move versions. No detect/clean: nothing to purge.
+  protoc:
+    version: "28.3"
+  buf:
+    version: "1.47.2"
+
 rust:
   version: "1.96.0"
   # rustup components — the slim base image ships the `minimal` profile, so these
   # are absent by default and `cargo clippy` / `cargo fmt` fail without them.
+  # rustc-dev + llvm-tools are required by `cargo dylint` to compile lint crates
+  # against rustc internals (see the dylint tools below).
   components:
     - clippy
     - rustfmt
+    - rustc-dev
+    - llvm-tools
+  # cargo subcommands installed from source (each is a `cargo install`, baked into
+  # the image — adds build time + a layer per tool, but present in every session).
+  tools:
+    - cargo-nextest
+    - cargo-audit
+    - cargo-watch
+    - sqlx-cli
+    - cargo-dylint
+    - dylint-link
   detect: "test -f Cargo.toml"
   clean: "cargo clean"

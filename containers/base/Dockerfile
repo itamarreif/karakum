@@ -9,17 +9,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       bash \
       build-essential \
       ca-certificates \
+      clang \
+      cmake \
       curl \
       fzf \
       git \
       gnupg \
       jq \
       less \
+      libclang-dev \
+      libpq-dev \
+      libssl-dev \
       ncurses-term \
       openssh-client \
+      perl \
       pkg-config \
       ripgrep \
       util-linux \
+      zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # just is not in Debian repos — install via official script
