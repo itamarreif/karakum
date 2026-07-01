@@ -18,4 +18,4 @@ ARG RUST_COMPONENTS=""
 RUN [ -z "$RUST_COMPONENTS" ] || rustup component add $RUST_COMPONENTS
 
 ARG RUST_TOOLS=""
-RUN [ -z "$RUST_TOOLS" ] || cargo install $RUST_TOOLS
+RUN [ -z "$RUST_TOOLS" ] || cargo install --locked $RUST_TOOLS
