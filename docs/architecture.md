@@ -20,8 +20,7 @@ Justfile recipe          →  shell command
 ─────────────────────────────────────────────────────────────
 just build               →  uv run karakum build           (Docker images)
 just install             →  uv pip install -e .            (install the CLI)
-just claude A [S] [P]     →  uv run karakum launch claude A S P claude
-just shell  A [S] [P]     →  uv run karakum launch claude A S P bash
+just shell  A [P] [S]     →  uv run karakum launch claude A P S bash
 just agents              →  uv run karakum agents
 just projects            →  uv run karakum projects
 just sessions [A]        →  uv run karakum session ls A    (alias: karakum sessions)
@@ -55,10 +54,11 @@ karakum/
   session.py      Per-session isolated clone. ensure() clones the source
                   repo into <sessions_root>/<agent>/<slug>/<label> (label =
                   "scratchpad" for the memory repo, else the project name),
-                  repoints origin at GitHub, checks out <agent>/<slug>.
-                  Reuses an existing clone, but only if its .git is a real
-                  directory (else fails loud). no_session_warning() for the
-                  no-slug escape hatch.
+                  repoints origin at GitHub, checks out the caller-supplied
+                  branch (<agent>/<slug> for a project, <project>/<slug> for
+                  memory). Reuses an existing clone, but only if its .git is a
+                  real directory (else fails loud). no_session_warning() for
+                  the no-slug escape hatch.
   config.py       Optional host settings from <config_dir>/config.yaml (a
                   missing file or key falls back to defaults). sessions_root()
                   / state_root() → where session clones / harness state live
@@ -98,7 +98,7 @@ uv run karakum <command> ...
    │
    ▼
 karakum.cli:main            (click.Group)
-   ├── launch   ◄── just claude / just shell
+   ├── launch   ◄── just shell
    ├── build    ◄── just build
    ├── agents   ◄── just agents
    ├── projects ◄── just projects
@@ -133,8 +133,8 @@ session_ls(agent?)                        session_rm(slug, --dry-run, --yes)
    └─ clone_status() in parallel             ├─ error if slug matches multiple agents
         (dirty, unpushed via ThreadPool)     ├─ print plan; stop if --dry-run
    └─ pr_states() batched per repo (gh)      └─ confirm (unless --yes) → cleanup.remove(s)
-   └─ print(agent slug label branch                (rmtree session dir + reap exited containers)
-            pr-state)
+   └─ print(agent label slug pr-state              (rmtree session dir + reap exited containers)
+            branch)
 ```
 
 `session clean` frees build artifacts without touching source or git state. It
@@ -175,10 +175,10 @@ session_down(slug, --yes)
 
 ## `launch` flow (the main path)
 
-Driven by `just claude` / `just shell`. Args: `toolchain agent slug [project] cmd`.
+Driven by `just shell`. Args: `toolchain agent project slug cmd`.
 
 ```
-cli.launch(toolchain, agent, slug, project, cmd_args)
+cli.launch(toolchain, agent, project, slug, cmd_args)
 │
 ├─1 preflight.check_tools()
 │      └─ shutil.which("docker")            # else SystemExit(2)
@@ -197,7 +197,8 @@ cli.launch(toolchain, agent, slug, project, cmd_args)
 │        ├─ ksession.no_session_warning()         # mounts LIVE repo, no clone
 │        └─ memory_session = memory_path ; session_name = "main"
 │      else:
-│        ├─ memory_session = ksession.ensure(memory_path, agent, slug, "agent", memory_repo)
+│        ├─ memory_branch = <project>/<slug> if project else <slug>
+│        ├─ memory_session = ksession.ensure(memory_path, agent, slug, "agent", memory_repo, memory_branch)
 │        │     ├─ session = config.sessions_root()/<agent>/<slug>/scratchpad
 │        │     │            (default root <data_dir>/sessions; config.yaml `sessions_root` override)
 │        │     ├─ if it exists: reuse it — but only if <session>/.git is a real
@@ -205,7 +206,7 @@ cli.launch(toolchain, agent, slug, project, cmd_args)
 │        │     ├─ git -C <repo> remote get-url origin          (capture GitHub URL)
 │        │     ├─ git clone --no-local file://<repo> <session>  (independent .git)
 │        │     ├─ git -C <session> remote set-url origin <url>
-│        │     └─ git -C <session> checkout [-b] <agent>/<slug>
+│        │     └─ git -C <session> checkout [-b] <memory_branch>
 │        └─ session_name = slug          # slug-only identity (no date); KARAKUM_SESSION
 │
 ├─3 PROJECT (optional, only if project != "-")
@@ -213,8 +214,8 @@ cli.launch(toolchain, agent, slug, project, cmd_args)
 │   ├─ manifest.expand_path / manifest.get  (path, repository)
 │   ├─ preflight.check_repo(project_path, project_repo, "project '...'")
 │   ├─ project_session = project_path  (no_session)
-│   │                  |  ksession.ensure(project_path, agent, slug, "project", project_repo)
-│   │                     → <sessions_root>/<agent>/<slug>/<project-name>
+│   │                  |  ksession.ensure(project_path, agent, slug, "project", project_repo, "<agent>/<slug>")
+│   │                     → <sessions_root>/<agent>/<slug>/<project-name>  on branch <agent>/<slug>
 │   └─ project_mount = ~/<project-name>             # mount under container home, not host path
 │       project_args = ["-v", "<ps>:<pm>:rw", "-e", "KARAKUM_PROJECT=<pm>"]
 │
@@ -268,8 +269,9 @@ cli ─┬─► preflight ──► (subprocess: git; shutil: docker/gh)
 - **Single exec handoff.** `launch` does all host-side prep (manifests →
   preflight → clone → secrets → argv), then `os.execvpe` *replaces* the Python
   process with `docker compose run`. Nothing after the exec runs; the container's
-  `cmd` (`claude` or `bash`) becomes the foreground process. That's why
-  `just shell` and `just claude` share one code path — only the final `cmd` differs.
+  `cmd` (`bash`, passed by the `shell` recipe) becomes the foreground process.
+  `launch` takes the `cmd` as a trailing argument, so a future recipe could exec
+  a different entry point (e.g. `claude`) through the same code path.
 
 - **Static vs dynamic contract.** `docker-compose.yaml` is the static half: it
   declares the toolchain service, the `claude` state mount, and the memory mount

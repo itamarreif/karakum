@@ -77,7 +77,7 @@ behaves — not just that the string looks right:
   when the image is missing (`run \`just build\` first`). It is **not** part of
   `just test` — it needs a host with Docker and a multi-GB image, so it stays an
   explicit, on-demand check. Anything `just smoke` still can't cover (e.g. the
-  full `just claude` launch path with real auth) stays a numbered manual
+  full `just shell` launch path with real auth) stays a numbered manual
   checklist in the tracking issue.
 
 ## Conventions

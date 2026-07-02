@@ -30,8 +30,8 @@ CLAUDE_IMAGE = "karakum-agent-claude:latest"
 def _git_identity_args(agent: str) -> list[str]:
     """Return docker -e args for GIT_AUTHOR_*/GIT_COMMITTER_* scoped to the agent.
 
-    Name  → agent name (e.g. "takwin")
-    Email → user+agent in the *local part* (e.g. "itamar.reif+takwin@gmail.com")
+    Name  → agent name (e.g. "alice")
+    Email → user+agent in the *local part* (e.g. "dev+alice@example.com")
 
     The `+agent` subaddress goes before the `@`, not in front of the whole address:
     plus-addressing routes on `localpart+tag@domain`, so the tag must follow the
@@ -143,10 +143,10 @@ def main():
 @main.command("launch", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 @click.argument("toolchain")
 @click.argument("agent")
+@click.argument("project")
 @click.argument("slug")
-@click.argument("project", default="-")
 @click.argument("cmd_args", nargs=-1, type=click.UNPROCESSED)
-def launch(toolchain, agent, slug, project, cmd_args):
+def launch(toolchain, agent, project, slug, cmd_args):
     """Launch an agent session in the given toolchain container."""
     if not cmd_args:
         raise click.UsageError("cmd is required")
@@ -155,8 +155,11 @@ def launch(toolchain, agent, slug, project, cmd_args):
     preflight.check_tools()
 
     no_session = slug in ("-", "")
+    has_project = project not in ("-", "")
 
     # --- memory (always present) ---
+    # The memory branch is namespaced by the project it serves (<project>/<slug>),
+    # falling back to a bare <slug> for a memory-only session (no project).
     agent_data = manifest.load(manifest.agent_path(agent))
     memory_path = manifest.expand_path(manifest.get(agent_data, "memory.path"))
     memory_repo = manifest.get(agent_data, "memory.repository")
@@ -167,20 +170,22 @@ def launch(toolchain, agent, slug, project, cmd_args):
         memory_session = memory_path
         session_name = "main"
     else:
-        memory_session = ksession.ensure(memory_path, agent, slug, "agent", memory_repo)
+        memory_branch = f"{project}/{slug}" if has_project else slug
+        memory_session = ksession.ensure(memory_path, agent, slug, "agent", memory_repo, memory_branch)
         session_name = slug
 
     # --- project (optional) ---
     # Mounts the project clone at ~/<repo-name>; the agent always lands in ~
-    # itself (see -w below), with scratchpad + project as siblings under it.
+    # itself (see -w below), with scratchpad + project as siblings under it. The
+    # project branch is namespaced by the agent (<agent>/<slug>).
     project_args: list = []
-    if project not in ("-", ""):
+    if has_project:
         proj_data = manifest.load(manifest.project_path(project))
         project_path_ = manifest.expand_path(manifest.get(proj_data, "path"))
         project_repo = manifest.get(proj_data, "repository")
         preflight.check_repo(project_path_, project_repo, f"project '{project}'")
 
-        project_session = project_path_ if no_session else ksession.ensure(project_path_, agent, slug, "project", project_repo)
+        project_session = project_path_ if no_session else ksession.ensure(project_path_, agent, slug, "project", project_repo, f"{agent}/{slug}")
         project_mount = f"{CONTAINER_HOME}/{Path(project_session).name}"
         project_args = [
             "-v", f"{project_session}:{project_mount}:rw",

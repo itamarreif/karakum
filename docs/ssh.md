@@ -62,7 +62,7 @@ For the **"Verified"** badge on GitHub, two things are required:
    can be added twice — once as an Authentication key, once as a Signing key.
 2. **Verify the agent committer email on your account** — commits use a
    plus-addressed identity with the agent in the local part
-   (`you+agent@host`, e.g. `itamar.reif+takwin@gmail.com`). If that address isn't a
+   (`you+agent@host`, e.g. `dev+alice@example.com`). If that address isn't a
    verified email on your GitHub account, GitHub reports *"No user is associated with
    the committer email"* and won't link or verify the commit. Add it under GitHub →
    Settings → **Emails**; the provider delivers `+`-tags to your base inbox
@@ -74,7 +74,7 @@ For the **"Verified"** badge on GitHub, two things are required:
 
 ```bash
 ssh-add -l                          # host: lists your GitHub key
-just shell <agent> <slug> <project>
+just shell <agent> <project> <slug>
 # inside the container:
 ssh-add -l                          # same keys
 ssh -T git@github.com               # "Hi <user>!"  (1Password prompts on the host)

@@ -1,6 +1,6 @@
 # karakum — agent instructions (AGENTS.md, open standard)
 
-Container infra for AI agents. Child of scratchpad issue #10; MVP per #14.
+Container infra for AI agents.
 
 This file uses [AGENTS.md](https://agents.md/) — the harness-agnostic convention so Claude Code, Codex, OpenCode, Cursor, Aider, Cline, etc. all read the same source of truth. No tool-specific `CLAUDE.md` / `.cursorrules` / etc. in this repo.
 
@@ -8,11 +8,11 @@ This file uses [AGENTS.md](https://agents.md/) — the harness-agnostic conventi
 
 karakum decouples three things that older agent systems conflate:
 
-1. **Toolchain** = which container image runs (`claude`, future `codex`, `opencode`, `pi`, `secret-manager`, …). Toolchain-specific, **not** agent-specific. Selected at invocation: `just claude takwin <slug>` runs on claude; `just codex takwin <slug>` runs the same agent on codex.
+1. **Toolchain** = which container image runs (`claude`, future `codex`, `opencode`, `pi`, `secret-manager`, …). Toolchain-specific, **not** agent-specific. Selected by the recipe: `just shell <agent> <project> <slug>` runs the claude toolchain image; a future `just codex …` recipe would run the same agent on codex.
 2. **Agent** = identity. Has a name + memory (the persistent self: skills, scratchpad, master prompt). Declared in `agents/<name>.yaml`. **No** toolchain field, **no** project field — agents are portable across both. Secrets are host-wide, not per-agent (declared once in `secrets.yaml`). The harness state (`~/.claude`) persists in a per-agent host dir (`<state_root>/<agent>`, default `~/.karakum/state`).
 3. **Project** = the workspace the agent acts on for this session. Declared in `projects/<name>.yaml`. Optional per session. Same agent can work on different projects across sessions.
 
-A session = (toolchain × agent × project? × session-slug). The launcher mounts the agent's memory clone and (if specified) the project clone, both on session branch `<agent>/<slug>` in independent clones of their respective repos.
+A session = (toolchain × agent × project? × session-slug). The launcher mounts the agent's memory clone and (if specified) the project clone in independent clones of their respective repos. Branches are namespaced per role: the project clone is on `<agent>/<slug>`, the memory clone on `<project>/<slug>` (or a bare `<slug>` when there's no project).
 
 ## Layout
 
@@ -52,7 +52,7 @@ karakum/
 - The agent's own workflow → skills (`agent-session`, `issue`, `doc`, etc.) + scratchpad.
 - The privileged services' internals → each is its own concern.
 - Workspace-specific tooling (dewey's RAG indexer, palimpsest's memory framework, etc.) → those repos.
-- The scratchpads themselves → individual scratchpad repos (e.g. takwin).
+- The scratchpads themselves → each agent's own memory repo.
 - Container hardening config → the Dockerfile + compose service definition.
 
 ## Code conventions
@@ -72,7 +72,7 @@ Orchestration logic lives in the Python package (`karakum/`) — including Docke
 - New agent = new `agents/<name>.yaml`. No code changes.
 - New project = new `projects/<name>.yaml`. No code changes.
 - New secret provider = one function + one dict entry in `karakum/secrets.py`. See the comment block there.
-- **No service ever publishes ports to the host.** All ingress flows through a Tailscale sidecar (#16).
+- **No service ever publishes ports to the host.** All ingress flows through a Tailscale sidecar.
 - Tier-1 hardening (`cap_drop: ALL`, `no-new-privileges`, `read_only: true` + tmpfs, `pids_limit`, `mem_limit`) lands as a follow-up commit on the toolchain image / compose service.
 
 ## Don't
@@ -83,9 +83,3 @@ Orchestration logic lives in the Python package (`karakum/`) — including Docke
 - Don't add project-specific logic to images either. Project-specificity is in `projects/<name>.yaml` plus what's in the project's own repo.
 - Don't put logic in the Justfile. Extract to `karakum/` (Python), including Docker builds (`karakum build`).
 - Don't add new shell scripts. Orchestration logic belongs in the Python package.
-
-## Planning context
-
-- `~/code/ai/.agents/scratchpad/issues/14-containerization-mvp.md` — MVP build order, deferred hardening, followups.
-- `~/code/ai/.agents/scratchpad/issues/16-tailscale-ingress.md` — ingress architecture.
-- `~/code/ai/.agents/scratchpad/docs/4-agent-session-workflow.md` — per-session PR workflow.

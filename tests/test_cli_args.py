@@ -32,23 +32,23 @@ def _env(args):
 # --- _git_identity_args ----------------------------------------------------
 
 def test_identity_email_is_user_plus_agent_in_local_part(monkeypatch):
-    monkeypatch.setattr(cli.subprocess, "run", _fake_git_config({"user.email": "itamar.reif@gmail.com"}))
-    env = _env(cli._git_identity_args("takwin"))
+    monkeypatch.setattr(cli.subprocess, "run", _fake_git_config({"user.email": "dev@example.com"}))
+    env = _env(cli._git_identity_args("alice"))
     # +agent goes in the local part, NOT in front (which would route elsewhere)
-    assert env["GIT_AUTHOR_EMAIL"] == "itamar.reif+takwin@gmail.com"
-    assert env["GIT_COMMITTER_EMAIL"] == "itamar.reif+takwin@gmail.com"
-    assert env["GIT_AUTHOR_NAME"] == "takwin"
-    assert env["GIT_COMMITTER_NAME"] == "takwin"
+    assert env["GIT_AUTHOR_EMAIL"] == "dev+alice@example.com"
+    assert env["GIT_COMMITTER_EMAIL"] == "dev+alice@example.com"
+    assert env["GIT_AUTHOR_NAME"] == "alice"
+    assert env["GIT_COMMITTER_NAME"] == "alice"
 
 
 def test_identity_email_without_at_falls_back(monkeypatch):
     monkeypatch.setattr(cli.subprocess, "run", _fake_git_config({"user.email": "localonly"}))
-    assert _env(cli._git_identity_args("takwin"))["GIT_AUTHOR_EMAIL"] == "localonly+takwin"
+    assert _env(cli._git_identity_args("alice"))["GIT_AUTHOR_EMAIL"] == "localonly+alice"
 
 
 def test_identity_no_email_returns_empty(monkeypatch):
     monkeypatch.setattr(cli.subprocess, "run", _fake_git_config({}))
-    assert cli._git_identity_args("takwin") == []
+    assert cli._git_identity_args("alice") == []
 
 
 # --- _git_signing_args -----------------------------------------------------

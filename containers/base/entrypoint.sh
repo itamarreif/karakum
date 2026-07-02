@@ -4,7 +4,7 @@
 # The base image bakes a single `agent` account whose uid/gid match the host so
 # bind-mounted sessions stay writable. Here we rename that account to the
 # launching agent (KARAKUM_AGENT) so `whoami`, the shell prompt (\u) and the
-# ownership of newly created files all read e.g. `takwin`, then exec the
+# ownership of newly created files all read e.g. `alice`, then exec the
 # requested command as that user. Only the *login name* changes — home stays
 # /home/agent (where the scratchpad/project/.claude mounts land), so mount
 # targets never depend on the agent name.

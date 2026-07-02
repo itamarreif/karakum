@@ -16,9 +16,9 @@ def _clone(label):
 
 def _session(labels):
     """A fake Session with the given clone labels (paths/branches don't matter)."""
-    clones = [cleanup.Clone(label=l, path=Path("/tmp") / l, branch="takwin/demo") for l in labels]
-    return cleanup.Session(agent="takwin", slug="demo",
-                           path=Path("/tmp/sessions/takwin/demo"), clones=clones)
+    clones = [cleanup.Clone(label=l, path=Path("/tmp") / l, branch="alice/demo") for l in labels]
+    return cleanup.Session(agent="alice", slug="demo",
+                           path=Path("/tmp/sessions/alice/demo"), clones=clones)
 
 
 def _text(result):
@@ -104,11 +104,11 @@ def test_clean_script_quotes_labels_and_is_tolerant():
 def test_running_containers_parses_names(monkeypatch):
     def run(cmd, **kw):
         assert cmd[:3] == ["docker", "ps", "--filter"]
-        assert "name=agent-takwin-fix-" in cmd
-        return SimpleNamespace(returncode=0, stdout="agent-takwin-fix-a1b2c3\nagent-takwin-fix-d4e5f6\n", stderr="")
+        assert "name=agent-alice-fix-" in cmd
+        return SimpleNamespace(returncode=0, stdout="agent-alice-fix-a1b2c3\nagent-alice-fix-d4e5f6\n", stderr="")
     monkeypatch.setattr(cleanup.subprocess, "run", run)
-    assert cleanup.running_containers("takwin", "fix") == [
-        "agent-takwin-fix-a1b2c3", "agent-takwin-fix-d4e5f6",
+    assert cleanup.running_containers("alice", "fix") == [
+        "agent-alice-fix-a1b2c3", "agent-alice-fix-d4e5f6",
     ]
 
 
@@ -184,18 +184,18 @@ def test_session_clean_unknown_slug_errors(monkeypatch):
 def test_session_down_yes_stops_containers(monkeypatch):
     monkeypatch.setattr(cli.cleanup, "iter_sessions", lambda: [_session(["scratchpad"])])
     monkeypatch.setattr(cli.cleanup, "running_containers",
-                        lambda a, s: ["agent-takwin-demo-aaa", "agent-takwin-demo-bbb"])
+                        lambda a, s: ["agent-alice-demo-aaa", "agent-alice-demo-bbb"])
     stopped = []
     monkeypatch.setattr(cli.cleanup, "stop_containers", lambda names: stopped.append(names))
     result = CliRunner().invoke(cli.main, ["session", "down", "demo", "--yes"])
     assert result.exit_code == 0, _text(result)
-    assert stopped == [["agent-takwin-demo-aaa", "agent-takwin-demo-bbb"]]
+    assert stopped == [["agent-alice-demo-aaa", "agent-alice-demo-bbb"]]
     assert "stopped 2 container(s)" in result.output
 
 
 def test_session_down_abort_does_not_stop(monkeypatch):
     monkeypatch.setattr(cli.cleanup, "iter_sessions", lambda: [_session(["scratchpad"])])
-    monkeypatch.setattr(cli.cleanup, "running_containers", lambda a, s: ["agent-takwin-demo-aaa"])
+    monkeypatch.setattr(cli.cleanup, "running_containers", lambda a, s: ["agent-alice-demo-aaa"])
     stopped = []
     monkeypatch.setattr(cli.cleanup, "stop_containers", lambda names: stopped.append(names))
     result = CliRunner().invoke(cli.main, ["session", "down", "demo"], input="n\n")

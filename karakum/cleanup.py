@@ -1,8 +1,10 @@
 """Session enumeration, status helpers, and removal.
 
 A *session* is `<sessions_root>/<agent>/<slug>/` and may hold several label
-clones (e.g. `scratchpad` + a project), each a full `git clone` on branch
-`<agent>/<slug>`.  Removal operates at the (agent, slug) granularity.
+clones (e.g. `scratchpad` + a project), each a full `git clone`. The project
+clone is on branch `<agent>/<slug>`; the memory (`scratchpad`) clone is on
+`<project>/<slug>` (or a bare `<slug>` when there's no project). Removal
+operates at the (agent, slug) granularity.
 """
 import json
 import shutil

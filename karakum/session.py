@@ -5,7 +5,7 @@ from pathlib import Path
 from karakum import config
 
 
-def ensure(repo: Path, agent: str, slug: str, role: str, repo_label: str) -> Path:
+def ensure(repo: Path, agent: str, slug: str, role: str, repo_label: str, branch: str) -> Path:
     """Create (or reuse) an isolated clone of `repo` for this session.
 
     Clones live under a central, configurable root grouped by session:
@@ -20,6 +20,12 @@ def ensure(repo: Path, agent: str, slug: str, role: str, repo_label: str) -> Pat
     is repointed at the host repo's GitHub remote so the agent pushes there;
     session branches reach the host via push + pull.
 
+    `branch` is the branch to check out — the caller namespaces it: `<agent>/<slug>`
+    for a project clone, `<project>/<slug>` for the memory clone (or a bare
+    `<slug>` for a memory-only session). The directory tree stays keyed by
+    `<agent>/<slug>` regardless, so a session's clones sit together even when
+    their branches differ.
+
     `role` ("agent" or "project") and `repo_label` (the manifest's canonical
     `repository`, e.g. `github.com/owner/repo`) label log output — a session
     spans one clone per repo, so the two lines otherwise look like a duplicate.
@@ -27,7 +33,6 @@ def ensure(repo: Path, agent: str, slug: str, role: str, repo_label: str) -> Pat
     depend on where the repo happens to be checked out.
     """
     repo = Path(repo).resolve()
-    branch = f"{agent}/{slug}"
     label = "scratchpad" if role == "agent" else repo_label.rstrip("/").split("/")[-1]
     session = config.sessions_root() / agent / slug / label
 

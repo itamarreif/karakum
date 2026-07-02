@@ -3,11 +3,11 @@
 # Run `just` (no args) to list recipes.
 #
 # Schema:
-#   just <toolchain> <agent> [<session>] [<project>]
-#   - toolchain selects the container image
-#   - agent provides identity (memory)
-#   - session names the work (becomes branch <agent>/<session>); '-' or omit for no session clone
-#   - project (optional) names a workspace repo to mount RW
+#   just shell <agent> <project> <slug>
+#   - agent provides identity (memory); project branch is <agent>/<slug>
+#   - project names a workspace repo to mount RW; memory branch is <project>/<slug>
+#     ('-' for no project — memory-only session, memory branch is just <slug>)
+#   - slug names the work; '-' for no session clone (runs on main, with a warning)
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
@@ -31,18 +31,15 @@ test:
 smoke:
     bash tests/smoke.sh
 
-# Run Claude Code: just claude <agent> [<session>] [<project>]
-claude agent session="-" project="-":
-    uv run karakum launch claude {{agent}} {{session}} {{project}} claude
-
-# Drop into bash: just shell <agent> [<session>] [<project>]
-shell agent session="-" project="-":
-    uv run karakum launch claude {{agent}} {{session}} {{project}} bash
+# Use '-' for <project> (memory-only) or <slug> (run on main branch).
+# Drop into a session shell: just shell <agent> <project> <slug>
+shell agent project="-" slug="-":
+    uv run karakum launch claude {{agent}} {{project}} {{slug}} bash
 
 # Copy the macOS clipboard image into the session container's /tmp; prints the path
-# to hand to the agent. just pngpaste <agent> <session> [<name>]
-pngpaste agent session name="clip.png":
-    uv run karakum pngpaste {{agent}} {{session}} {{name}}
+# to hand to the agent. just pngpaste <agent> <slug> [<name>]
+pngpaste agent slug name="clip.png":
+    uv run karakum pngpaste {{agent}} {{slug}} {{name}}
 
 # List configured agents.
 agents:
