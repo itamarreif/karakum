@@ -18,7 +18,4 @@ ARG RUST_COMPONENTS=""
 RUN [ -z "$RUST_COMPONENTS" ] || rustup component add $RUST_COMPONENTS
 
 ARG RUST_TOOLS=""
-# --locked builds each tool against its published Cargo.lock (reproducible image,
-# not fresh semver-latest deps at build time). It's also mandatory for some tools:
-# `cargo install cargo-nextest` without --locked is unsupported and aborts.
 RUN [ -z "$RUST_TOOLS" ] || cargo install --locked $RUST_TOOLS
