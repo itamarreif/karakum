@@ -52,6 +52,10 @@ rust:
     - llvm-tools
   # cargo subcommands installed from source (each is a `cargo install`, baked into
   # the image — adds build time + a layer per tool, but present in every session).
+  # Installed with `--locked` (see containers/toolchain-rust/Dockerfile): builds
+  # each tool against its published Cargo.lock, and is *mandatory* for cargo-nextest
+  # — `cargo install cargo-nextest` without --locked aborts by design and fails the
+  # whole build.
   tools:
     - cargo-nextest
     - cargo-audit
