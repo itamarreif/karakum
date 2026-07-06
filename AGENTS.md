@@ -17,22 +17,25 @@ A session = (toolchain × agent × project? × session-slug). The launcher mount
 ## Layout
 
 ```
-karakum/
+karakum/                    # THIS REPO — version-controlled, generic
   containers/<toolchain>/   Docker images. Toolchain-specific, not agent-specific.
-  agents/<name>.yaml        Agent identity: name + memory.
-  projects/<name>.yaml      Workspace repos the agent can act on (path + repository).
-  secrets.yaml              Host-wide secret references (op://…), shared by all agents.
   Justfile                  Host entry point: thin recipes dispatching to the CLI.
   karakum/                  Python CLI package (uv pip install -e . or uv run karakum).
-    cli.py                  Entry point: launch, build, agents, projects, session group (ls / rm).
+    cli.py                  Entry point: launch, pngpaste, build, agents, projects, session group (ls / rm / clean / down).
     manifest.py             YAML manifest loading.
-    preflight.py            Docker + git + gh checks.
+    preflight.py            Docker + git repo checks.
     secrets.py              Secret resolution (op://, env://); pluggable providers.
     session.py              Per-session isolated clone lifecycle.
     cleanup.py              Session listing (iter_sessions, pr_states) + remove.
-  examples/toolchains.yaml  Toolchain versions + components seed; copied into the config dir, read by `karakum build`.
+  examples/                 Genericized seed config (agents/, projects/, secrets.yaml, toolchains.yaml) → copy into the config dir.
   docker-compose.yaml       One service per toolchain.
   pyproject.toml            Python package definition; deps: click, pyyaml.
+
+$KARAKUM_CONFIG_DIR/        # YOUR CONFIG (default ~/.config/karakum) — NOT in this repo
+  agents/<name>.yaml        Agent identity: name + memory.
+  projects/<name>.yaml      Workspace repos the agent can act on (path + repository).
+  secrets.yaml              Host-wide secret references (op://…), shared by all agents.
+  toolchains.yaml           Toolchain versions + components, read by `karakum build`.
 ```
 
 ## Scope of this layer (the guiding list)

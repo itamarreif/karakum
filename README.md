@@ -153,7 +153,7 @@ just session-down <slug> [--yes]             # stop a stuck session's container(
 
 ```
 agent   label       slug       pr-state   branch
-alice   scratchpad  fix-login   #12       webapp/fix-login*
+alice   scratchpad  fix-login   no-pr     webapp/fix-login*
 alice   webapp      fix-login   #12       alice/fix-login↑2
 ```
 

@@ -23,7 +23,8 @@ just install             →  uv pip install -e .            (install the CLI)
 just shell  A [P] [S]     →  uv run karakum launch claude A P S bash
 just agents              →  uv run karakum agents
 just projects            →  uv run karakum projects
-just sessions [A]        →  uv run karakum session ls A    (alias: karakum sessions)
+just pngpaste A S [N]     →  uv run karakum pngpaste A S N   (clipboard image → session container)
+just sessions [A]        →  uv run karakum session ls A | column -t   (alias: karakum sessions)
 just session-rm S [..]   →  uv run karakum session rm S ..
 just session-clean S [..]→  uv run karakum session clean S ..  (free build artifacts)
 just session-down S [..] →  uv run karakum session down S ..   (stop a stuck container)
@@ -37,8 +38,8 @@ karakum/
   __init__.py     Empty — marks the package.
   __main__.py     `python -m karakum` shim: imports cli.main and calls it.
   cli.py          The Click app. Defines `main` group + commands:
-                  launch / build / agents / projects / session (group: ls,
-                  rm, clean, down). `sessions` is an alias for `session ls`.
+                  launch / pngpaste / build / agents / projects / session
+                  (group: ls, rm, clean, down). `sessions` aliases `session ls`.
                   Orchestrates everything; ends `launch` by exec'ing
                   `docker compose run`.
   manifest.py     YAML manifest I/O + location resolvers. karakum_root()
@@ -99,6 +100,7 @@ uv run karakum <command> ...
    ▼
 karakum.cli:main            (click.Group)
    ├── launch   ◄── just shell
+   ├── pngpaste ◄── just pngpaste
    ├── build    ◄── just build
    ├── agents   ◄── just agents
    ├── projects ◄── just projects
@@ -230,7 +232,11 @@ cli.launch(toolchain, agent, project, slug, cmd_args)
 │   ├─ env = os.environ | env_dict ; env["MEMORY_SESSION"]=memory_session ; env["MEMORY_MOUNT"]=~/scratchpad
 │   └─ (secret values go into env; only "-e VAR" names hit the argv)
 │
-├─5 BUILD docker argv
+├─5 STATE (per-agent ~/.claude, host-owned)
+│   ├─ state_dir = config.state_root()/<agent> ; mkdir -p ; env["CLAUDE_STATE_DIR"]=state_dir
+│   └─ seed state_dir/.claude.json → hasCompletedOnboarding=true   # read-modify-write; skips claude's first-run wizard
+│
+├─6 BUILD docker argv
 │   container_name = f"agent-{agent}-{slug_label}-{uuid4[:6]}"
 │   docker_cmd = ["docker","compose","run","--rm","--name",...,
 │                 "-e KARAKUM_SESSION/AGENT", "-e KARAKUM_MEMORY=~/scratchpad", *project_args,
@@ -241,7 +247,7 @@ cli.launch(toolchain, agent, project, slug, cmd_args)
 │                 "-w", "/home/agent", *secret_docker_args,   # always land in ~
 │                 f"agent-{toolchain}", cmd, *extra_args]
 │
-└─6 HANDOFF
+└─7 HANDOFF
     ├─ os.chdir(manifest.karakum_root())    # so compose finds docker-compose.yaml
     └─ os.execvpe("docker", docker_cmd, env)   # replaces the process; no return
 ```

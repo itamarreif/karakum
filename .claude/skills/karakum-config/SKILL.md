@@ -85,8 +85,8 @@ dir** persist — clean them too or they linger:
 rm "$KARAKUM_CONFIG_DIR/agents/<name>.yaml"      # or projects/<name>.yaml
 
 # 2. reap its session clones (per slug)
-karakum session ls <name>                         # see what exists
-karakum session rm <slug>                         # repeat per slug (asks first)
+karakum session ls <agent>                        # lists an AGENT's sessions (no project filter — see note below)
+karakum session rm <slug>                         # repeat per slug (asks first; aborts if the slug exists under multiple agents)
 
 # 3. (agents only) remove persistent harness state
 rm -rf "${KARAKUM_DATA_DIR:-$HOME/.karakum}/state/<name>"
