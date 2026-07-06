@@ -20,11 +20,12 @@ Justfile recipe          →  shell command
 ─────────────────────────────────────────────────────────────
 just build               →  uv run karakum build           (Docker images)
 just install             →  uv pip install -e .            (install the CLI)
-just claude A [S] [P]     →  uv run karakum launch claude A S P claude
-just shell  A [S] [P]     →  uv run karakum launch claude A S P bash
+just shell  A [P] [S]     →  uv run karakum launch claude A P S bash
+just resume S            →  uv run karakum resume S        (reopen existing session by slug)
 just agents              →  uv run karakum agents
 just projects            →  uv run karakum projects
-just sessions [A]        →  uv run karakum session ls A    (alias: karakum sessions)
+just pngpaste A S [N]     →  uv run karakum pngpaste A S N   (clipboard image → session container)
+just sessions [A]        →  uv run karakum session ls A | column -t   (alias: karakum sessions)
 just session-rm S [..]   →  uv run karakum session rm S ..
 just session-clean S [..]→  uv run karakum session clean S ..  (free build artifacts)
 just session-down S [..] →  uv run karakum session down S ..   (stop a stuck container)
@@ -38,10 +39,10 @@ karakum/
   __init__.py     Empty — marks the package.
   __main__.py     `python -m karakum` shim: imports cli.main and calls it.
   cli.py          The Click app. Defines `main` group + commands:
-                  launch / build / agents / projects / session (group: ls,
-                  rm, clean, down). `sessions` is an alias for `session ls`.
-                  Orchestrates everything; ends `launch` by exec'ing
-                  `docker compose run`.
+                  launch / resume / pngpaste / build / agents / projects /
+                  session (group: ls, rm, clean, down). `sessions` aliases
+                  `session ls`. `launch` and `resume` share `_do_launch`, which
+                  orchestrates everything and ends by exec'ing `docker compose run`.
   manifest.py     YAML manifest I/O + location resolvers. karakum_root()
                   (the checkout), config_dir() ($KARAKUM_CONFIG_DIR, default
                   ~/.config/karakum), data_dir() ($KARAKUM_DATA_DIR, default
@@ -55,10 +56,11 @@ karakum/
   session.py      Per-session isolated clone. ensure() clones the source
                   repo into <sessions_root>/<agent>/<slug>/<label> (label =
                   "scratchpad" for the memory repo, else the project name),
-                  repoints origin at GitHub, checks out <agent>/<slug>.
-                  Reuses an existing clone, but only if its .git is a real
-                  directory (else fails loud). no_session_warning() for the
-                  no-slug escape hatch.
+                  repoints origin at GitHub, checks out the caller-supplied
+                  branch (<agent>/<slug> for a project, <project>/<slug> for
+                  memory). Reuses an existing clone, but only if its .git is a
+                  real directory (else fails loud). no_session_warning() for
+                  the no-slug escape hatch.
   config.py       Optional host settings from <config_dir>/config.yaml (a
                   missing file or key falls back to defaults). sessions_root()
                   / state_root() → where session clones / harness state live
@@ -98,7 +100,9 @@ uv run karakum <command> ...
    │
    ▼
 karakum.cli:main            (click.Group)
-   ├── launch   ◄── just claude / just shell
+   ├── launch   ◄── just shell
+   ├── resume   ◄── just resume    (resolve session → _do_launch)
+   ├── pngpaste ◄── just pngpaste
    ├── build    ◄── just build
    ├── agents   ◄── just agents
    ├── projects ◄── just projects
@@ -110,9 +114,10 @@ karakum.cli:main            (click.Group)
          └── down  ◄── just session-down
 ```
 
-All three of `rm` / `clean` / `down` resolve their `<slug>` argument through the
-shared `_resolve_session()` helper, so they share identical no-match and
-multi-agent-collision errors.
+`resume` and `rm` / `clean` / `down` all resolve their `<slug>` argument through
+the shared `_resolve_session()` helper, so they share identical no-match and
+multi-agent-collision behavior: a bare slug that exists under several agents
+errors, and is disambiguated by qualifying it as `<agent>/<slug>`.
 
 `agents` / `projects` just glob the manifest dir and print a TSV:
 
@@ -133,8 +138,8 @@ session_ls(agent?)                        session_rm(slug, --dry-run, --yes)
    └─ clone_status() in parallel             ├─ error if slug matches multiple agents
         (dirty, unpushed via ThreadPool)     ├─ print plan; stop if --dry-run
    └─ pr_states() batched per repo (gh)      └─ confirm (unless --yes) → cleanup.remove(s)
-   └─ print(agent slug label branch                (rmtree session dir + reap exited containers)
-            pr-state)
+   └─ print(agent label slug pr-state              (rmtree session dir + reap exited containers)
+            branch)
 ```
 
 `session clean` frees build artifacts without touching source or git state. It
@@ -175,10 +180,10 @@ session_down(slug, --yes)
 
 ## `launch` flow (the main path)
 
-Driven by `just claude` / `just shell`. Args: `toolchain agent slug [project] cmd`.
+Driven by `just shell`. Args: `toolchain agent project slug cmd`.
 
 ```
-cli.launch(toolchain, agent, slug, project, cmd_args)
+cli.launch(toolchain, agent, project, slug, cmd_args)
 │
 ├─1 preflight.check_tools()
 │      └─ shutil.which("docker")            # else SystemExit(2)
@@ -197,7 +202,8 @@ cli.launch(toolchain, agent, slug, project, cmd_args)
 │        ├─ ksession.no_session_warning()         # mounts LIVE repo, no clone
 │        └─ memory_session = memory_path ; session_name = "main"
 │      else:
-│        ├─ memory_session = ksession.ensure(memory_path, agent, slug, "agent", memory_repo)
+│        ├─ memory_branch = <project>/<slug> if project else <slug>
+│        ├─ memory_session = ksession.ensure(memory_path, agent, slug, "agent", memory_repo, memory_branch)
 │        │     ├─ session = config.sessions_root()/<agent>/<slug>/scratchpad
 │        │     │            (default root <data_dir>/sessions; config.yaml `sessions_root` override)
 │        │     ├─ if it exists: reuse it — but only if <session>/.git is a real
@@ -205,7 +211,7 @@ cli.launch(toolchain, agent, slug, project, cmd_args)
 │        │     ├─ git -C <repo> remote get-url origin          (capture GitHub URL)
 │        │     ├─ git clone --no-local file://<repo> <session>  (independent .git)
 │        │     ├─ git -C <session> remote set-url origin <url>
-│        │     └─ git -C <session> checkout [-b] <agent>/<slug>
+│        │     └─ git -C <session> checkout [-b] <memory_branch>
 │        └─ session_name = slug          # slug-only identity (no date); KARAKUM_SESSION
 │
 ├─3 PROJECT (optional, only if project != "-")
@@ -213,8 +219,8 @@ cli.launch(toolchain, agent, slug, project, cmd_args)
 │   ├─ manifest.expand_path / manifest.get  (path, repository)
 │   ├─ preflight.check_repo(project_path, project_repo, "project '...'")
 │   ├─ project_session = project_path  (no_session)
-│   │                  |  ksession.ensure(project_path, agent, slug, "project", project_repo)
-│   │                     → <sessions_root>/<agent>/<slug>/<project-name>
+│   │                  |  ksession.ensure(project_path, agent, slug, "project", project_repo, "<agent>/<slug>")
+│   │                     → <sessions_root>/<agent>/<slug>/<project-name>  on branch <agent>/<slug>
 │   └─ project_mount = ~/<project-name>             # mount under container home, not host path
 │       project_args = ["-v", "<ps>:<pm>:rw", "-e", "KARAKUM_PROJECT=<pm>"]
 │
@@ -229,7 +235,11 @@ cli.launch(toolchain, agent, slug, project, cmd_args)
 │   ├─ env = os.environ | env_dict ; env["MEMORY_SESSION"]=memory_session ; env["MEMORY_MOUNT"]=~/scratchpad
 │   └─ (secret values go into env; only "-e VAR" names hit the argv)
 │
-├─5 BUILD docker argv
+├─5 STATE (per-agent ~/.claude, host-owned)
+│   ├─ state_dir = config.state_root()/<agent> ; mkdir -p ; env["CLAUDE_STATE_DIR"]=state_dir
+│   └─ seed state_dir/.claude.json → hasCompletedOnboarding=true   # read-modify-write; skips claude's first-run wizard
+│
+├─6 BUILD docker argv
 │   container_name = f"agent-{agent}-{slug_label}-{uuid4[:6]}"
 │   docker_cmd = ["docker","compose","run","--rm","--name",...,
 │                 "-e KARAKUM_SESSION/AGENT", "-e KARAKUM_MEMORY=~/scratchpad", *project_args,
@@ -240,7 +250,7 @@ cli.launch(toolchain, agent, slug, project, cmd_args)
 │                 "-w", "/home/agent", *secret_docker_args,   # always land in ~
 │                 f"agent-{toolchain}", cmd, *extra_args]
 │
-└─6 HANDOFF
+└─7 HANDOFF
     ├─ os.chdir(manifest.karakum_root())    # so compose finds docker-compose.yaml
     └─ os.execvpe("docker", docker_cmd, env)   # replaces the process; no return
 ```
@@ -268,8 +278,9 @@ cli ─┬─► preflight ──► (subprocess: git; shutil: docker/gh)
 - **Single exec handoff.** `launch` does all host-side prep (manifests →
   preflight → clone → secrets → argv), then `os.execvpe` *replaces* the Python
   process with `docker compose run`. Nothing after the exec runs; the container's
-  `cmd` (`claude` or `bash`) becomes the foreground process. That's why
-  `just shell` and `just claude` share one code path — only the final `cmd` differs.
+  `cmd` (`bash`, passed by the `shell` recipe) becomes the foreground process.
+  `launch` takes the `cmd` as a trailing argument, so a future recipe could exec
+  a different entry point (e.g. `claude`) through the same code path.
 
 - **Static vs dynamic contract.** `docker-compose.yaml` is the static half: it
   declares the toolchain service, the `claude` state mount, and the memory mount

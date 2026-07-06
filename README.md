@@ -13,10 +13,10 @@ karakum decouples:
 3. **Project** (workspace the agent acts on) — `<config-dir>/projects/<name>.yaml`. Optional per session.
 
 ```
-just <toolchain> <agent> [<session-slug>] [<project>]
-just claude takwin fix-egress-proxy karakum    # toolchain=claude, agent=takwin, project=karakum
-just claude takwin organize-notes              # toolchain=claude, agent=takwin, no project (memory only)
-just claude takwin                             # no slug → runs on main branch (with disclaimer)
+just shell <agent> <project> <slug>
+just shell alice webapp fix-login    # agent=alice on project=webapp, session slug=fix-login
+just shell alice - organize-notes    # no project (memory only) — '-' skips the project
+just shell alice - -                 # no slug → runs on main branch (with disclaimer)
 ```
 
 ## Three locations
@@ -26,7 +26,7 @@ karakum splits its files across three locations, by lifecycle. Full model in
 
 ```
 # REPO (this checkout) — version-controlled, generic, shareable
-karakum/  containers/  docker-compose.yaml  scripts/  Justfile
+karakum/  containers/  docker-compose.yaml  Justfile
 examples/                Genericized sample config to copy into the config dir.
 
 # CONFIG ($KARAKUM_CONFIG_DIR, default ~/.config/karakum) — your settings, dotfiles-friendly
@@ -116,21 +116,28 @@ just install                                         # install the karakum CLI (
 uv tool install --editable .                         # editable install — still imports from this checkout
 just build                                           # build base + claude images (~5-10 min)
 claude setup-token                                   # one-time (host): make an OAuth token → reference as CLAUDE_CODE_OAUTH_TOKEN in secrets.yaml
-just claude takwin <slug>                            # memory-only session (note-taking, organizing, etc.)
-just claude takwin <slug> <project>                  # session that also has <project> mounted RW
-just claude takwin                                   # no slug: run on main branch (shows disclaimer)
+just shell <agent> - <slug>                          # memory-only session (note-taking, organizing, etc.)
+just shell <agent> <project> <slug>                  # session that also has <project> mounted RW
+just shell <agent> - -                               # no slug: run on main branch (shows disclaimer)
+just resume <slug>                                   # reopen an existing session by slug (agent + project recovered from disk)
 ```
+
+The container is the `claude` toolchain image, so `claude` is on `PATH` — `just
+shell` drops you at a prompt in the session home; run `claude` there to start the
+agent, or work in the shell directly.
 
 `uv tool install --editable .` keeps the installed `karakum` importing from this
 checkout, so `karakum_root()` still resolves to the repo where
 `docker-compose.yaml` and `containers/` live — `just build` and Dockerfile edits
 keep working. Recommended for a personal, single-machine install.
 
-`<slug>` names what the session is about. The launcher creates (or reuses) an **isolated clone** at `<sessions_root>/<agent>/<slug>/<label>` on branch `<agent>/<slug>` for **both** the memory repo (`label` = `scratchpad`) and the project repo (`label` = the project name), if specified. Grouping by session keeps every repo a session touches together, and living outside the repos means it never collides with a manual `git worktree add`. Each clone is fully independent (its own `.git`, no shared objects), so the agent can never touch the host repo's git database; its `origin` points at GitHub, so commits reach the host via push + pull/PR, not a shared `.git`. The slug is the stable session identity — resuming the same slug (even on a later day) reuses the same clone and branch. Omitting the slug skips cloning and mounts the live main branch directly — a warning is printed since changes affect the repo immediately.
+`<slug>` names what the session is about. The launcher creates (or reuses) an **isolated clone** at `<sessions_root>/<agent>/<slug>/<label>` for **both** the memory repo (`label` = `scratchpad`) and the project repo (`label` = the project name), if specified. The two clones sit together under `<agent>/<slug>` but check out **differently namespaced branches**: the project clone is on `<agent>/<slug>` (whose changes are the agent's), while the memory clone is on `<project>/<slug>` — so a memory repo shared across projects keeps each project's session work on its own branch. (With no project, the memory branch is just `<slug>`.) Grouping by session keeps every repo a session touches together, and living outside the repos means it never collides with a manual `git worktree add`. Each clone is fully independent (its own `.git`, no shared objects), so the agent can never touch the host repo's git database; its `origin` points at GitHub, so commits reach the host via push + pull/PR, not a shared `.git`. The slug is the stable session identity — resuming the same slug (even on a later day) reuses the same clone and branch. Omitting the slug (`-`) skips cloning and mounts the live main branch directly — a warning is printed since changes affect the repo immediately.
 
 > `<sessions_root>` defaults to `<data_dir>/sessions` (`$KARAKUM_DATA_DIR`, default `~/.karakum`). Override it by setting `sessions_root` in `<config-dir>/config.yaml`, or relocate the whole data dir with `$KARAKUM_DATA_DIR`. Because clones live there (not inside the repos), no per-repo `.gitignore` entry is needed.
 
 Multiple terminals can open the **same slug** concurrently; each gets a unique container name so Docker doesn't conflict.
+
+To **reopen** an existing session without retyping its agent and project, use `just resume <slug>`: it finds the session's clones on disk, recovers the agent and project from them, and drops you back into the same branches. If the slug exists under more than one agent it lists them and errors — qualify it as `just resume <agent>/<slug>`, or fall back to the explicit `just shell <agent> <project> <slug>` (which also lets you pick a project when a session spans several). `just shell …` stays the way to **create** a session.
 
 `just` (no args) lists all recipes; `just agents` lists configured agents; `just projects` lists configured projects.
 
@@ -148,14 +155,14 @@ just session-down <slug> [--yes]             # stop a stuck session's container(
 `just sessions` (alias: `karakum session ls`) prints one row per clone:
 
 ```
-agent   slug    label    branch                  pr-state
-takwin  foo     agent    takwin/foo [#12 merged]  merged
-takwin  foo     project  takwin/foo [#12 merged]  merged
+agent   label       slug       pr-state   branch
+alice   scratchpad  fix-login   no-pr     webapp/fix-login*
+alice   webapp      fix-login   #12       alice/fix-login↑2
 ```
 
-The branch column folds in dirty/unpushed state and PR number. The pr-state column queries GitHub via `gh`; omit `gh` and it shows `no-gh`.
+The branch column folds in dirty (`*`) and unpushed (`↑N`) state; note the two clones of a session carry differently namespaced branches (memory on `<project>/<slug>`, project on `<agent>/<slug>`). The pr-state column queries GitHub via `gh` (`#N` for an open PR, else the state, `no-pr` if none); without `gh` it shows `?`.
 
-`just session-rm <slug>` (alias: `karakum session rm <slug>`) deletes the entire session directory and reaps any exited `agent-<agent>-<slug>-*` containers. If the slug matches clones under multiple agents it prints them and asks you to disambiguate.
+`just session-rm <slug>` (alias: `karakum session rm <slug>`) deletes the entire session directory and reaps any exited `agent-<agent>-<slug>-*` containers. If the slug exists under multiple agents it lists them and errors; qualify it as `<agent>/<slug>` to pick one. (Same for `session-clean` / `session-down` / `resume` — they share one resolver.)
 
 Flags: `--dry-run` (show what would be removed, delete nothing), `--yes` (skip the confirmation prompt).
 
@@ -166,18 +173,18 @@ Flags: `--dry-run` (show what would be removed, delete nothing), `--yes` (skip t
 Invoke from anywhere with a shell alias:
 
 ```sh
-alias karakum='just --justfile ~/code/ai/karakum/Justfile --working-directory ~/code/ai/karakum'
-karakum claude takwin try-the-mvp karakum
+alias karakum='just --justfile ~/path/to/karakum/Justfile --working-directory ~/path/to/karakum'
+karakum shell alice webapp try-the-mvp
 ```
 
 ## Mount contract
 
-Session clones mount **under the container home (`~`)**, never at their host paths, so the container is unaware of the external filesystem and the prompt stays clean (`takwin:~ $`). The host path the clone lives at is an implementation detail the agent never sees.
+Session clones mount **under the container home (`~`)**, never at their host paths, so the container is unaware of the external filesystem and the prompt stays clean (`alice:~ $`). The host path the clone lives at is an implementation detail the agent never sees.
 
 - **Memory session clone** (the "scratchpad") at host `<sessions_root>/<agent>/<slug>/scratchpad/`, mounted **RW** at `~/scratchpad`.
 - **Project session clone** (if a project is specified) at host `<sessions_root>/<agent>/<slug>/<project>/`, mounted **RW** at `~/<project>` (the repo name).
 - **CWD** inside the container = `~` (home); scratchpad and project sit as siblings under it.
-- **User**: the baked `agent` account is renamed at runtime to the launching agent (e.g. `takwin`) by the image entrypoint, so `whoami`/`\u`/new-file ownership read the agent name. Home stays `/home/agent`.
+- **User**: the baked `agent` account is renamed at runtime to the launching agent (e.g. `alice`) by the image entrypoint, so `whoami`/`\u`/new-file ownership read the agent name. Home stays `/home/agent`.
 - **`~/.claude/`** inside the container is bind-mounted from a per-agent host dir `<state_root>/<agent>` (default `<data_dir>/state`, i.e. `~/.karakum/state`), so settings/trust/history persist across runs and the dir stays host-owned (agent-writable, inspectable).
 - **Env vars**: `KARAKUM_MEMORY` (`~/scratchpad`), `KARAKUM_PROJECT` (`~/<project>`, when set), `KARAKUM_SESSION`, `KARAKUM_AGENT`.
 
@@ -206,12 +213,10 @@ Claude Code authenticates from `CLAUDE_CODE_OAUTH_TOKEN` (above) — interactive
 
 Adding a new provider (Vault, AWS Secrets Manager, macOS keychain, …) is a one-function registration. Provider-specific tool checks are lazy; only used providers require their CLI.
 
-See `~/code/ai/.agents/skills/secrets/SKILL.md` for methodology, anti-patterns, and quality bar.
-
 ## Ingress
 
-No service in karakum ever publishes ports to the host. When the first listener arrives, it routes through a Tailscale sidecar per `scratchpad/issues/16-tailscale-ingress.md`.
+No service in karakum ever publishes ports to the host. When the first listener arrives, it will route through a Tailscale sidecar.
 
 ## Pending
 
-See followups in `~/code/ai/.agents/scratchpad/issues/14-containerization-mvp.md`: tier-1 hardening, egress proxy, per-capability tool services, isolation upgrades.
+Planned followups: tier-1 hardening (`cap_drop`, `no-new-privileges`, read-only rootfs + tmpfs, `pids_limit`/`mem_limit`), an egress proxy, per-capability tool services, and further isolation upgrades.

@@ -15,7 +15,7 @@ karakum keeps three kinds of files apart, split by lifecycle:
 
 ```
 # REPO (the karakum checkout) — version-controlled, generic, shareable
-karakum/  containers/  docker-compose.yaml  scripts/  Justfile
+karakum/  containers/  docker-compose.yaml  Justfile
 examples/                # genericized sample config to copy into the config dir
 pyproject.toml  docs/  README.md
 

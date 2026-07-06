@@ -1,6 +1,6 @@
 ---
 name: karakum-config
-description: Add, remove, or edit karakum agents and projects — the per-entity YAML manifests under $KARAKUM_CONFIG_DIR (default ~/.config/karakum). Use when wiring a new repo into karakum as an agent (memory repo) or project (workspace repo), retiring one, or debugging the "no manifest at …" / "unexpected origin" preflight failures from `just claude`.
+description: Add, remove, or edit karakum agents and projects — the per-entity YAML manifests under $KARAKUM_CONFIG_DIR (default ~/.config/karakum). Use when wiring a new repo into karakum as an agent (memory repo) or project (workspace repo), retiring one, or debugging the "no manifest at …" / "unexpected origin" preflight failures from `just shell`.
 user-invocable: true
 created: 2026-06-23
 ---
@@ -17,7 +17,7 @@ gotchas.
 - Adding a new agent (an identity backed by a memory git repo) or project (a
   workspace git repo the agent acts on).
 - Retiring an agent/project and cleaning up the data it left behind.
-- A `just claude …` run fails preflight with `no manifest at …` or
+- A `just shell …` run fails preflight with `no manifest at …` or
   `unexpected origin`.
 
 ## Where things live
@@ -32,8 +32,8 @@ $KARAKUM_DATA_DIR          (default ~/.karakum)          — generated, clean up
   state/<agent>/                     persistent ~/.claude per agent
 ```
 
-The **filename basename is the identity** you pass on the CLI (`just claude <agent>
-<slug> <project>`), via `manifest.agent_path()` / `project_path()`. The `name:`
+The **filename basename is the identity** you pass on the CLI (`just shell <agent>
+<project> <slug>`), via `manifest.agent_path()` / `project_path()`. The `name:`
 field inside is for branch/container labels — keep it equal to the basename to
 avoid confusion.
 
@@ -52,7 +52,7 @@ avoid confusion.
 
    Start from `examples/agents/example.yaml` if unsure.
 3. Verify: `karakum agents` (or `just agents`) — the new row should appear.
-4. Smoke-test: `just claude <name> -` (no-slug = mounts memory live; warns).
+4. Smoke-test: `just shell <name> - -` (no project, no slug = mounts memory live; warns).
 
 Secrets are **host-wide**, not per-agent — they live in
 `$KARAKUM_CONFIG_DIR/secrets.yaml`, shared by every agent. Adding an agent never
@@ -73,7 +73,7 @@ touches secrets.
    #   - cd webapp && npm run clean --if-present && rm -rf node_modules .next
    ```
 3. Verify: `karakum projects` (or `just projects`).
-4. Use it: `just claude <agent> <slug> <name>`.
+4. Use it: `just shell <agent> <name> <slug>`.
 
 ## Remove an agent / project
 
@@ -85,8 +85,8 @@ dir** persist — clean them too or they linger:
 rm "$KARAKUM_CONFIG_DIR/agents/<name>.yaml"      # or projects/<name>.yaml
 
 # 2. reap its session clones (per slug)
-karakum session ls <name>                         # see what exists
-karakum session rm <slug>                         # repeat per slug (asks first)
+karakum session ls <agent>                        # lists an AGENT's sessions (no project filter — see note below)
+karakum session rm <slug>                         # repeat per slug (asks first; use <agent>/<slug> if it exists under >1 agent)
 
 # 3. (agents only) remove persistent harness state
 rm -rf "${KARAKUM_DATA_DIR:-$HOME/.karakum}/state/<name>"
@@ -104,12 +104,12 @@ session dir. There's no project-only reaper.
   So `github.com/you/r`, `git@github.com:you/r.git`, and
   `https://github.com/you/r` are all equal — but a typo or a fork's origin fails
   with `unexpected origin` and exits 2.
-- **Filename, not `name:`, is the lookup key.** `just claude foo …` loads
+- **Filename, not `name:`, is the lookup key.** `just shell foo …` loads
   `agents/foo.yaml` regardless of the `name:` inside. Mismatched `name:` only
   confuses the listing output.
 - **No remote yet?** Preflight refuses a repo with no `origin` (PRs need a
   remote). Add one first: `git -C <path> remote add origin <url>`.
-- **Editing is just editing the file** — no reload/cache. The next `just claude`
+- **Editing is just editing the file** — no reload/cache. The next `just shell`
   reads it fresh.
 
 ## Verify
