@@ -129,7 +129,7 @@ def test_stop_containers_noop_on_empty(monkeypatch):
 # --- session clean command (CliRunner, no docker) --------------------------
 
 def _stub_clean(monkeypatch, *, sessions, toolchains, projects):
-    monkeypatch.setattr(cli.cleanup, "iter_sessions", lambda: sessions)
+    monkeypatch.setattr(cli.cleanup, "iter_sessions", lambda agent=None:sessions)
     monkeypatch.setattr(cli.manifest, "toolchains_path", lambda: Path("toolchains.yaml"))
     monkeypatch.setattr(cli.manifest, "load", lambda p: toolchains)
     monkeypatch.setattr(cli, "_project_clean_map", lambda: projects)
@@ -182,7 +182,7 @@ def test_session_clean_unknown_slug_errors(monkeypatch):
 # --- session down command (CliRunner, no docker) ---------------------------
 
 def test_session_down_yes_stops_containers(monkeypatch):
-    monkeypatch.setattr(cli.cleanup, "iter_sessions", lambda: [_session(["scratchpad"])])
+    monkeypatch.setattr(cli.cleanup, "iter_sessions", lambda agent=None:[_session(["scratchpad"])])
     monkeypatch.setattr(cli.cleanup, "running_containers",
                         lambda a, s: ["agent-alice-demo-aaa", "agent-alice-demo-bbb"])
     stopped = []
@@ -194,7 +194,7 @@ def test_session_down_yes_stops_containers(monkeypatch):
 
 
 def test_session_down_abort_does_not_stop(monkeypatch):
-    monkeypatch.setattr(cli.cleanup, "iter_sessions", lambda: [_session(["scratchpad"])])
+    monkeypatch.setattr(cli.cleanup, "iter_sessions", lambda agent=None:[_session(["scratchpad"])])
     monkeypatch.setattr(cli.cleanup, "running_containers", lambda a, s: ["agent-alice-demo-aaa"])
     stopped = []
     monkeypatch.setattr(cli.cleanup, "stop_containers", lambda names: stopped.append(names))
@@ -203,7 +203,7 @@ def test_session_down_abort_does_not_stop(monkeypatch):
 
 
 def test_session_down_no_running_containers(monkeypatch):
-    monkeypatch.setattr(cli.cleanup, "iter_sessions", lambda: [_session(["scratchpad"])])
+    monkeypatch.setattr(cli.cleanup, "iter_sessions", lambda agent=None:[_session(["scratchpad"])])
     monkeypatch.setattr(cli.cleanup, "running_containers", lambda a, s: [])
     called = []
     monkeypatch.setattr(cli.cleanup, "stop_containers", lambda names: called.append(names))

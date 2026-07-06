@@ -36,6 +36,11 @@ smoke:
 shell agent project="-" slug="-":
     uv run karakum launch claude {{agent}} {{project}} {{slug}} bash
 
+# Reopen an existing session by slug (agent + project recovered from disk):
+# just resume <slug>  — or <agent>/<slug> if the slug exists under >1 agent.
+resume slug:
+    uv run karakum resume {{slug}}
+
 # Copy the macOS clipboard image into the session container's /tmp; prints the path
 # to hand to the agent. just pngpaste <agent> <slug> [<name>]
 pngpaste agent slug name="clip.png":
@@ -54,13 +59,16 @@ sessions agent="":
     uv run karakum session ls {{agent}} | column -t
 
 # Remove a session directory: just session-rm <slug> [--dry-run] [--yes]
+# <slug> may be qualified as <agent>/<slug> if it exists under more than one agent.
 session-rm slug *flags:
     uv run karakum session rm {{slug}} {{flags}}
 
 # Free disk: run each toolchain's clean in the session's clones. just session-clean <slug> [--dry-run]
+# <slug> may be qualified as <agent>/<slug> to disambiguate.
 session-clean slug *flags:
     uv run karakum session clean {{slug}} {{flags}}
 
 # Stop running containers for a stuck session: just session-down <slug> [--yes]
+# <slug> may be qualified as <agent>/<slug> to disambiguate.
 session-down slug *flags:
     uv run karakum session down {{slug}} {{flags}}

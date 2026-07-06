@@ -21,6 +21,7 @@ Justfile recipe          →  shell command
 just build               →  uv run karakum build           (Docker images)
 just install             →  uv pip install -e .            (install the CLI)
 just shell  A [P] [S]     →  uv run karakum launch claude A P S bash
+just resume S            →  uv run karakum resume S        (reopen existing session by slug)
 just agents              →  uv run karakum agents
 just projects            →  uv run karakum projects
 just pngpaste A S [N]     →  uv run karakum pngpaste A S N   (clipboard image → session container)
@@ -38,10 +39,10 @@ karakum/
   __init__.py     Empty — marks the package.
   __main__.py     `python -m karakum` shim: imports cli.main and calls it.
   cli.py          The Click app. Defines `main` group + commands:
-                  launch / pngpaste / build / agents / projects / session
-                  (group: ls, rm, clean, down). `sessions` aliases `session ls`.
-                  Orchestrates everything; ends `launch` by exec'ing
-                  `docker compose run`.
+                  launch / resume / pngpaste / build / agents / projects /
+                  session (group: ls, rm, clean, down). `sessions` aliases
+                  `session ls`. `launch` and `resume` share `_do_launch`, which
+                  orchestrates everything and ends by exec'ing `docker compose run`.
   manifest.py     YAML manifest I/O + location resolvers. karakum_root()
                   (the checkout), config_dir() ($KARAKUM_CONFIG_DIR, default
                   ~/.config/karakum), data_dir() ($KARAKUM_DATA_DIR, default
@@ -100,6 +101,7 @@ uv run karakum <command> ...
    ▼
 karakum.cli:main            (click.Group)
    ├── launch   ◄── just shell
+   ├── resume   ◄── just resume    (resolve session → _do_launch)
    ├── pngpaste ◄── just pngpaste
    ├── build    ◄── just build
    ├── agents   ◄── just agents
@@ -112,9 +114,10 @@ karakum.cli:main            (click.Group)
          └── down  ◄── just session-down
 ```
 
-All three of `rm` / `clean` / `down` resolve their `<slug>` argument through the
-shared `_resolve_session()` helper, so they share identical no-match and
-multi-agent-collision errors.
+`resume` and `rm` / `clean` / `down` all resolve their `<slug>` argument through
+the shared `_resolve_session()` helper, so they share identical no-match and
+multi-agent-collision behavior: a bare slug that exists under several agents
+errors, and is disambiguated by qualifying it as `<agent>/<slug>`.
 
 `agents` / `projects` just glob the manifest dir and print a TSV:
 

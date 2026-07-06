@@ -21,7 +21,7 @@ karakum/                    # THIS REPO — version-controlled, generic
   containers/<toolchain>/   Docker images. Toolchain-specific, not agent-specific.
   Justfile                  Host entry point: thin recipes dispatching to the CLI.
   karakum/                  Python CLI package (uv pip install -e . or uv run karakum).
-    cli.py                  Entry point: launch, pngpaste, build, agents, projects, session group (ls / rm / clean / down).
+    cli.py                  Entry point: launch, resume, pngpaste, build, agents, projects, session group (ls / rm / clean / down).
     manifest.py             YAML manifest loading.
     preflight.py            Docker + git repo checks.
     secrets.py              Secret resolution (op://, env://); pluggable providers.

@@ -151,7 +151,18 @@ def launch(toolchain, agent, project, slug, cmd_args):
     if not cmd_args:
         raise click.UsageError("cmd is required")
     cmd, *extra_args = cmd_args
+    _do_launch(toolchain, agent, project, slug, cmd, extra_args)
 
+
+def _do_launch(toolchain, agent, project, slug, cmd, extra_args=()):
+    """Host-side prep + exec of a session container (shared by `launch`/`resume`).
+
+    Ensures the memory clone (branch `<project>/<slug>`, or a bare `<slug>` with no
+    project) and, if given, the project clone (branch `<agent>/<slug>`), wires up
+    secrets / git identity / per-agent `~/.claude` state, then execs
+    `docker compose run`. Existing clones are reused in place, so this doubles as
+    the `resume` path.
+    """
     preflight.check_tools()
 
     no_session = slug in ("-", "")
@@ -245,6 +256,58 @@ def launch(toolchain, agent, project, slug, cmd_args):
 
     os.chdir(manifest.karakum_root())
     os.execvpe(docker_cmd[0], docker_cmd, env)
+
+
+def _project_for_label(label: str) -> "str | None":
+    """Map a session clone label (a repo basename) back to a project manifest name.
+
+    `session.ensure` labels a project clone by its repository's last path segment;
+    this reverses that through the projects manifests so `resume` can hand a name
+    back to the launch path. Returns None if no manifest's repository matches.
+    """
+    projects_dir = manifest.config_dir() / "projects"
+    if not projects_dir.is_dir():
+        return None
+    for path in sorted(projects_dir.glob("*.yaml")):
+        repo = (manifest.get(manifest.load(path), "repository") or "").rstrip("/")
+        if repo and repo.split("/")[-1] == label:
+            return path.stem
+    return None
+
+
+@main.command("resume", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+@click.argument("spec")
+@click.argument("cmd_args", nargs=-1, type=click.UNPROCESSED)
+def resume(spec, cmd_args):
+    """Reopen an existing session: `karakum resume <slug>` (or `<agent>/<slug>`).
+
+    Resolves the session on disk — erroring if a bare slug exists under multiple
+    agents — recovers its agent + project from the clones already there, and
+    relaunches a shell into the same branches. Use `just shell <agent> <project>
+    <slug>` to create a new session, or to pick one project when a session spans
+    several.
+    """
+    session = _resolve_session(spec)
+
+    proj_labels = [c.label for c in session.clones if c.label != "scratchpad"]
+    if len(proj_labels) > 1:
+        listed = ", ".join(sorted(proj_labels))
+        raise click.ClickException(
+            f"session {session.agent}/{session.slug} spans multiple projects ({listed}); "
+            f"reopen one with 'just shell {session.agent} <project> {session.slug}'."
+        )
+
+    project = "-"
+    if proj_labels:
+        project = _project_for_label(proj_labels[0])
+        if project is None:
+            raise click.ClickException(
+                f"can't map clone '{proj_labels[0]}' back to a project manifest; "
+                f"reopen explicitly with 'just shell {session.agent} <project> {session.slug}'."
+            )
+
+    cmd, *extra = cmd_args or ("bash",)
+    _do_launch("claude", session.agent, project, session.slug, cmd, extra)
 
 
 @main.command("pngpaste")
@@ -372,20 +435,24 @@ def session_group():
     pass
 
 
-def _resolve_session(slug: str) -> "cleanup.Session":
-    """Find the one session matching `slug`, or raise a click error.
+def _resolve_session(spec: str) -> "cleanup.Session":
+    """Find the one session matching `spec`, or raise a click error.
 
-    Shared by rm/clean/down so they have identical no-match / multi-agent
-    semantics (a slug can collide across agents).
+    `spec` is a bare `<slug>` or an `<agent>/<slug>` qualifier. Shared by
+    resume/rm/clean/down so they have identical no-match / multi-agent semantics:
+    a bare slug can collide across agents, so qualify it as `<agent>/<slug>` to
+    pick one.
     """
-    matches = [s for s in cleanup.iter_sessions() if s.slug == slug]
+    agent, _, slug = spec.rpartition("/")
+    matches = [s for s in cleanup.iter_sessions(agent or None) if s.slug == slug]
     if not matches:
-        raise click.ClickException(f"no session with slug '{slug}'")
+        where = f" under agent '{agent}'" if agent else ""
+        raise click.ClickException(f"no session with slug '{slug}'{where}")
     if len(matches) > 1:
         lines = "\n".join(f"  {s.agent}/{s.slug}  {s.path}" for s in matches)
         raise click.ClickException(
             f"slug '{slug}' matches sessions under multiple agents:\n{lines}\n"
-            f"Use 'karakum session ls' to review, then remove the specific clone directory manually."
+            f"Re-run qualified as '<agent>/{slug}' to pick one."
         )
     return matches[0]
 

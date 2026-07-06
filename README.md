@@ -119,6 +119,7 @@ claude setup-token                                   # one-time (host): make an 
 just shell <agent> - <slug>                          # memory-only session (note-taking, organizing, etc.)
 just shell <agent> <project> <slug>                  # session that also has <project> mounted RW
 just shell <agent> - -                               # no slug: run on main branch (shows disclaimer)
+just resume <slug>                                   # reopen an existing session by slug (agent + project recovered from disk)
 ```
 
 The container is the `claude` toolchain image, so `claude` is on `PATH` — `just
@@ -135,6 +136,8 @@ keep working. Recommended for a personal, single-machine install.
 > `<sessions_root>` defaults to `<data_dir>/sessions` (`$KARAKUM_DATA_DIR`, default `~/.karakum`). Override it by setting `sessions_root` in `<config-dir>/config.yaml`, or relocate the whole data dir with `$KARAKUM_DATA_DIR`. Because clones live there (not inside the repos), no per-repo `.gitignore` entry is needed.
 
 Multiple terminals can open the **same slug** concurrently; each gets a unique container name so Docker doesn't conflict.
+
+To **reopen** an existing session without retyping its agent and project, use `just resume <slug>`: it finds the session's clones on disk, recovers the agent and project from them, and drops you back into the same branches. If the slug exists under more than one agent it lists them and errors — qualify it as `just resume <agent>/<slug>`, or fall back to the explicit `just shell <agent> <project> <slug>` (which also lets you pick a project when a session spans several). `just shell …` stays the way to **create** a session.
 
 `just` (no args) lists all recipes; `just agents` lists configured agents; `just projects` lists configured projects.
 
@@ -159,7 +162,7 @@ alice   webapp      fix-login   #12       alice/fix-login↑2
 
 The branch column folds in dirty (`*`) and unpushed (`↑N`) state; note the two clones of a session carry differently namespaced branches (memory on `<project>/<slug>`, project on `<agent>/<slug>`). The pr-state column queries GitHub via `gh` (`#N` for an open PR, else the state, `no-pr` if none); without `gh` it shows `?`.
 
-`just session-rm <slug>` (alias: `karakum session rm <slug>`) deletes the entire session directory and reaps any exited `agent-<agent>-<slug>-*` containers. If the slug matches clones under multiple agents it prints them and asks you to disambiguate.
+`just session-rm <slug>` (alias: `karakum session rm <slug>`) deletes the entire session directory and reaps any exited `agent-<agent>-<slug>-*` containers. If the slug exists under multiple agents it lists them and errors; qualify it as `<agent>/<slug>` to pick one. (Same for `session-clean` / `session-down` / `resume` — they share one resolver.)
 
 Flags: `--dry-run` (show what would be removed, delete nothing), `--yes` (skip the confirmation prompt).
 
