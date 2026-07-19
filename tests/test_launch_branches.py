@@ -89,6 +89,62 @@ def test_project_and_memory_get_distinct_namespaces(monkeypatch, tmp_path):
     assert clones["proj.git"] == "alice/fix-login"
 
 
+def _capture_exec(monkeypatch):
+    """Record the docker argv/env passed to execvpe instead of running it."""
+    captured = {}
+
+    def fake_exec(file, argv, env):
+        captured["argv"], captured["env"] = argv, env
+        raise _Exec()
+
+    monkeypatch.setattr(cli.os, "execvpe", fake_exec)
+    return captured
+
+
+def test_mount_at_agent_home_plus_toolchain_and_init_hook(monkeypatch, tmp_path):
+    mem, proj = tmp_path / "src_mem", tmp_path / "src_proj"
+    _mkrepo(mem)
+    _mkrepo(proj)
+    _wire(monkeypatch, tmp_path, mem, proj)
+
+    hook = 'ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.claude/CLAUDE.md"'
+
+    def load(path):
+        if str(path).startswith("AGENT:"):
+            return {"memory": {"path": str(mem), "repository": "https://example.com/mem.git",
+                               "init": hook}}
+        if str(path).startswith("PROJECT:"):
+            return {"path": str(proj), "repository": "https://example.com/proj.git"}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(cli.manifest, "load", load)
+    captured = _capture_exec(monkeypatch)
+
+    res = CliRunner().invoke(cli.main, ["launch", "claude", "alice", "webapp", "fix-login", "bash"])
+    assert isinstance(res.exception, _Exec), res.output
+
+    argv = captured["argv"]
+    # The vault mounts at ~/<agent>, not ~/scratchpad (no doubled scratchpad/).
+    assert "KARAKUM_MEMORY=/home/agent/alice" in argv
+    assert captured["env"]["MEMORY_MOUNT"] == "/home/agent/alice"
+    # The toolchain is exposed so a hook can pick a toolchain-specific destination.
+    assert "KARAKUM_TOOLCHAIN=claude" in argv
+    # The init hook is passed through verbatim.
+    assert f"KARAKUM_MEMORY_INIT={hook}" in argv
+
+
+def test_no_init_env_when_hook_unset(monkeypatch, tmp_path):
+    mem, proj = tmp_path / "src_mem", tmp_path / "src_proj"
+    _mkrepo(mem)
+    _mkrepo(proj)
+    _wire(monkeypatch, tmp_path, mem, proj)
+    captured = _capture_exec(monkeypatch)
+
+    res = CliRunner().invoke(cli.main, ["launch", "claude", "alice", "-", "notes", "bash"])
+    assert isinstance(res.exception, _Exec), res.output
+    assert not any(str(a).startswith("KARAKUM_MEMORY_INIT=") for a in captured["argv"])
+
+
 def test_memory_only_session_uses_bare_slug(monkeypatch, tmp_path):
     mem, proj = tmp_path / "src_mem", tmp_path / "src_proj"
     _mkrepo(mem)

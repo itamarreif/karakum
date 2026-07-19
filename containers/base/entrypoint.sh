@@ -16,7 +16,18 @@ if [ "$target" != "agent" ]; then
     groupmod -n "$target" agent 2>/dev/null || true
 fi
 
-# Drop root -> agent account, preserving the env the launcher injected
-# (KARAKUM_*, GIT_*, SSH_AUTH_SOCK, TERM, COLORTERM, …). We entered as root so
-# HOME is /root; force it back to the account's home for ~/.bashrc + ~/.claude.
-exec runuser -u "$target" -- env "HOME=/home/agent" "$@"
+# Run as the agent account with the launcher-injected env (KARAKUM_*, GIT_*,
+# SSH_AUTH_SOCK, TERM, COLORTERM, …) and HOME forced back to the account's home
+# (we entered as root, so HOME is /root) for ~/.bashrc + ~/.claude.
+as_agent() { runuser -u "$target" -- env "HOME=/home/agent" "$@"; }
+
+# Optional per-agent setup hook: a shell command the launcher passed for the
+# agent's memory (KARAKUM_MEMORY_INIT). Runs once here, after the mounts are in
+# place, from the vault root. Expected to be idempotent; a failure is
+# non-fatal so a broken hook never blocks the session.
+if [ -n "${KARAKUM_MEMORY_INIT:-}" ]; then
+    as_agent sh -c 'cd "${KARAKUM_MEMORY:-$HOME}" 2>/dev/null; '"$KARAKUM_MEMORY_INIT" \
+        || echo "karakum: memory init hook failed (continuing): $KARAKUM_MEMORY_INIT" >&2
+fi
+
+exec as_agent "$@"

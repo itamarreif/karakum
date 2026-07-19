@@ -181,12 +181,13 @@ karakum shell alice webapp try-the-mvp
 
 Session clones mount **under the container home (`~`)**, never at their host paths, so the container is unaware of the external filesystem and the prompt stays clean (`alice:~ $`). The host path the clone lives at is an implementation detail the agent never sees.
 
-- **Memory session clone** (the "scratchpad") at host `<sessions_root>/<agent>/<slug>/scratchpad/`, mounted **RW** at `~/scratchpad`.
+- **Memory session clone** (the vault) at host `<sessions_root>/<agent>/<slug>/scratchpad/`, mounted **RW** at `~/<agent>` — the clone *is* the vault root, so a vault's own `scratchpad/` lands at `~/<agent>/scratchpad`, not `~/scratchpad/scratchpad`.
 - **Project session clone** (if a project is specified) at host `<sessions_root>/<agent>/<slug>/<project>/`, mounted **RW** at `~/<project>` (the repo name).
-- **CWD** inside the container = `~` (home); scratchpad and project sit as siblings under it.
+- **CWD** inside the container = `~` (home); the memory clone and project sit as siblings under it.
 - **User**: the baked `agent` account is renamed at runtime to the launching agent (e.g. `alice`) by the image entrypoint, so `whoami`/`\u`/new-file ownership read the agent name. Home stays `/home/agent`.
 - **`~/.claude/`** inside the container is bind-mounted from a per-agent host dir `<state_root>/<agent>` (default `<data_dir>/state`, i.e. `~/.karakum/state`), so settings/trust/history persist across runs and the dir stays host-owned (agent-writable, inspectable).
-- **Env vars**: `KARAKUM_MEMORY` (`~/scratchpad`), `KARAKUM_PROJECT` (`~/<project>`, when set), `KARAKUM_SESSION`, `KARAKUM_AGENT`.
+- **Setup hook** (optional): an agent's `memory.init` command runs in-container after the mounts land (see [configuration](docs/configuration.md)) — e.g. to link the memory framework's master prompt into `~/.claude/CLAUDE.md`.
+- **Env vars**: `KARAKUM_MEMORY` (`~/<agent>`), `KARAKUM_PROJECT` (`~/<project>`, when set), `KARAKUM_TOOLCHAIN`, `KARAKUM_SESSION`, `KARAKUM_AGENT`.
 
 The agent sees **only** its memory clone and (if specified) project clone — nothing else from the broader filesystem. Crucially, the **host repos' `.git` directories are never mounted**: each session is a standalone clone, so the agent cannot read or rewrite the host's branches, refs, config, or hooks. Both source repos must be git repos with `origin` remotes matching the manifest's `repository` field; the launcher fails loudly otherwise, and repoints each clone's `origin` at that remote so the agent pushes to GitHub.
 

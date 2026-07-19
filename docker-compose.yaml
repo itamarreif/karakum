@@ -20,8 +20,8 @@ services:
       # moves it into ~/.claude. See anthropics/claude-code#14313.
       CLAUDE_CONFIG_DIR: /home/agent/.claude
     volumes:
-      # Memory session clone (the "scratchpad"), mounted under the container home
-      # at ${MEMORY_MOUNT} (~/scratchpad) rather than its host path, so the
+      # Memory session clone (the vault), mounted under the container home
+      # at ${MEMORY_MOUNT} (~/<agent>) rather than its host path, so the
       # container never sees the external filesystem. `:-/dev/null` keeps `docker
       # compose build` from expanding to a bare `::rw` when the vars are unset.
       - ${MEMORY_SESSION:-/dev/null}:${MEMORY_MOUNT:-/dev/null}:rw
