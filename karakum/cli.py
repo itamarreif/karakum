@@ -212,6 +212,10 @@ def _do_launch(toolchain, agent, project, slug, cmd, extra_args=()):
     env_dict, secret_docker_args = ksecrets.load()
     env = os.environ.copy()
     env.update(env_dict)
+    # Surface a stale GitHub token at launch rather than on the first in-container
+    # `gh` call (gh authenticates solely from GH_TOKEN; git runs over SSH). Warns,
+    # never blocks.
+    preflight.check_github_token(env.get("GH_TOKEN"))
     env["MEMORY_SESSION"] = str(memory_session)
     # Where the memory clone (vault) mounts inside the container (compose reads
     # MEMORY_MOUNT as the bind target; see docker-compose.yaml). Mounted at
