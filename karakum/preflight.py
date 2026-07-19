@@ -1,6 +1,9 @@
+import json
 import shutil
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 
@@ -14,6 +17,48 @@ def check_gh() -> None:
     if not shutil.which("gh"):
         print("karakum: 'gh' not on PATH (install GitHub CLI: brew install gh)", file=sys.stderr)
         raise SystemExit(2)
+
+
+def check_github_token(token: str) -> None:
+    """Warn (non-fatal) if a resolved GH_TOKEN is present but GitHub rejects it.
+
+    In the container `gh` authenticates solely from `GH_TOKEN`; git runs over SSH
+    on a separate path. A stale token therefore doesn't block the session — but a
+    401 at launch is far clearer than a mystery `Bad credentials` on the first
+    `gh` call. We hit `GET /user` with a short timeout and only warn on a
+    definitive auth rejection; unreachable-GitHub / offline is ignored so a network
+    blip never gates a launch.
+    """
+    if not token:
+        return
+    req = urllib.request.Request(
+        "https://api.github.com/user",
+        headers={"Authorization": f"Bearer {token}", "User-Agent": "karakum-preflight"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            login = json.load(resp).get("login")
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            print(
+                "karakum: WARNING — GH_TOKEN is set but GitHub rejected it (401 Bad credentials). "
+                "`gh` will fail in-container (git over SSH still works). Refresh the token at its "
+                "source in secrets.yaml and relaunch.",
+                file=sys.stderr,
+            )
+        elif e.code == 403:
+            print(
+                "karakum: WARNING — GH_TOKEN is set but GitHub returned 403 (missing scopes, SSO, "
+                "or rate limit). `gh` may fail in-container.",
+                file=sys.stderr,
+            )
+        # Any other HTTP status: not an auth verdict — stay quiet.
+    except (urllib.error.URLError, TimeoutError, OSError):
+        # Offline / GitHub unreachable — not the token's fault; don't gate launch.
+        pass
+    else:
+        if login:
+            print(f"karakum: GH_TOKEN valid (gh authenticates as {login}).", file=sys.stderr)
 
 
 def _canonicalize(repo: str) -> str:

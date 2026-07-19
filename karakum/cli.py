@@ -16,7 +16,7 @@ from karakum import secrets as ksecrets
 from karakum import session as ksession
 
 # Container home. Every session repo mounts *under* this path so the container
-# never sees host paths: scratchpad (agent memory) → ~/scratchpad, project →
+# never sees host paths: the memory clone (vault) → ~/<agent>, project →
 # ~/<repo-name>. Matches the home of the baked `agent` account (renamed to the
 # launching agent at runtime by the image entrypoint).
 CONTAINER_HOME = "/home/agent"
@@ -174,6 +174,11 @@ def _do_launch(toolchain, agent, project, slug, cmd, extra_args=()):
     agent_data = manifest.load(manifest.agent_path(agent))
     memory_path = manifest.expand_path(manifest.get(agent_data, "memory.path"))
     memory_repo = manifest.get(agent_data, "memory.repository")
+    # Optional per-agent setup hook: a shell command run inside the container
+    # after mounts land (see entrypoint.sh + KARAKUM_MEMORY_INIT below). karakum
+    # stays framework-agnostic — the manifest decides what it does (e.g. link the
+    # memory framework's master prompt into ~/.claude/CLAUDE.md).
+    memory_init = manifest.get(agent_data, "memory.init")
     preflight.check_repo(memory_path, memory_repo, "memory")
 
     if no_session:
@@ -187,8 +192,8 @@ def _do_launch(toolchain, agent, project, slug, cmd, extra_args=()):
 
     # --- project (optional) ---
     # Mounts the project clone at ~/<repo-name>; the agent always lands in ~
-    # itself (see -w below), with scratchpad + project as siblings under it. The
-    # project branch is namespaced by the agent (<agent>/<slug>).
+    # itself (see -w below), with the memory clone (~/<agent>) + project as
+    # siblings under it. The project branch is namespaced by the agent (<agent>/<slug>).
     project_args: list = []
     if has_project:
         proj_data = manifest.load(manifest.project_path(project))
@@ -207,10 +212,16 @@ def _do_launch(toolchain, agent, project, slug, cmd, extra_args=()):
     env_dict, secret_docker_args = ksecrets.load()
     env = os.environ.copy()
     env.update(env_dict)
+    # Surface a stale GitHub token at launch rather than on the first in-container
+    # `gh` call (gh authenticates solely from GH_TOKEN; git runs over SSH). Warns,
+    # never blocks.
+    preflight.check_github_token(env.get("GH_TOKEN"))
     env["MEMORY_SESSION"] = str(memory_session)
-    # Where the scratchpad (memory clone) mounts inside the container (compose
-    # reads MEMORY_MOUNT as the bind target; see docker-compose.yaml).
-    env["MEMORY_MOUNT"] = f"{CONTAINER_HOME}/scratchpad"
+    # Where the memory clone (vault) mounts inside the container (compose reads
+    # MEMORY_MOUNT as the bind target; see docker-compose.yaml). Mounted at
+    # ~/<agent> — the clone *is* the vault root, so its own `scratchpad/` lands at
+    # ~/<agent>/scratchpad (not ~/scratchpad/scratchpad).
+    env["MEMORY_MOUNT"] = f"{CONTAINER_HOME}/{agent}"
 
     # Per-agent harness state (~/.claude): a host dir, bind-mounted by compose via
     # ${CLAUDE_STATE_DIR}. Host-owned (created as the launching user == container
@@ -236,12 +247,19 @@ def _do_launch(toolchain, agent, project, slug, cmd, extra_args=()):
     slug_label = slug if not no_session else "main"
     container_name = f"agent-{agent}-{slug_label}-{uuid.uuid4().hex[:6]}"
 
+    # The setup hook (if any) is passed verbatim; entrypoint.sh runs it via `sh -c`
+    # as the agent user after mounts land. Toolchain-agnostic agents get the
+    # toolchain via env so a hook can pick a toolchain-specific destination.
+    init_args = ["-e", f"KARAKUM_MEMORY_INIT={memory_init}"] if memory_init else []
+
     docker_cmd = [
         "docker", "compose", "run", "--rm",
         "--name", container_name,
         "-e", f"KARAKUM_SESSION={session_name}",
         "-e", f"KARAKUM_AGENT={agent}",
-        "-e", f"KARAKUM_MEMORY={CONTAINER_HOME}/scratchpad",
+        "-e", f"KARAKUM_TOOLCHAIN={toolchain}",
+        "-e", f"KARAKUM_MEMORY={CONTAINER_HOME}/{agent}",
+        *init_args,
         *project_args,
         *_git_identity_args(agent),
         *_ssh_agent_args(),

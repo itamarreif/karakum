@@ -12,7 +12,7 @@ home, each on its own role-namespaced branch:
 
 | Clone       | Mount (`$VAR`)                     | Branch                                |
 |-------------|-----------------------------------|---------------------------------------|
-| memory      | `~/scratchpad` (`$KARAKUM_MEMORY`) | `<project>/<slug>` (or bare `<slug>`) |
+| memory      | `~/<agent>` (`$KARAKUM_MEMORY`)    | `<project>/<slug>` (or bare `<slug>`) |
 | project     | `~/<repo>` (`$KARAKUM_PROJECT`)    | `<agent>/<slug>`                      |
 
 The project clone is present only when the session was launched with a project.

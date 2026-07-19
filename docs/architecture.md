@@ -232,7 +232,7 @@ cli.launch(toolchain, agent, project, slug, cmd_args)
 │   │             ├─ _provider_op(ref)  → op read <ref>        (subprocess)
 │   │             └─ _provider_env(ref) → os.environ[VAR]
 │   │         returns (env_dict, ["-e", VAR, ...])
-│   ├─ env = os.environ | env_dict ; env["MEMORY_SESSION"]=memory_session ; env["MEMORY_MOUNT"]=~/scratchpad
+│   ├─ env = os.environ | env_dict ; env["MEMORY_SESSION"]=memory_session ; env["MEMORY_MOUNT"]=~/<agent>
 │   └─ (secret values go into env; only "-e VAR" names hit the argv)
 │
 ├─5 STATE (per-agent ~/.claude, host-owned)
@@ -242,7 +242,7 @@ cli.launch(toolchain, agent, project, slug, cmd_args)
 ├─6 BUILD docker argv
 │   container_name = f"agent-{agent}-{slug_label}-{uuid4[:6]}"
 │   docker_cmd = ["docker","compose","run","--rm","--name",...,
-│                 "-e KARAKUM_SESSION/AGENT", "-e KARAKUM_MEMORY=~/scratchpad", *project_args,
+│                 "-e KARAKUM_SESSION/AGENT/TOOLCHAIN", "-e KARAKUM_MEMORY=~/<agent>", *init_args, *project_args,
 │                 *_git_identity_args(agent),            # GIT_AUTHOR/COMMITTER → agent (user+agent@host)
 │                 *_ssh_agent_args(),                    # forward host SSH agent (see docs/ssh.md)
 │                 *_git_signing_args(),                  # SSH commit signing via that agent
@@ -284,7 +284,7 @@ cli ─┬─► preflight ──► (subprocess: git; shutil: docker/gh)
 
 - **Static vs dynamic contract.** `docker-compose.yaml` is the static half: it
   declares the toolchain service, the `claude` state mount, and the memory mount
-  (host `${MEMORY_SESSION}` → container `${MEMORY_MOUNT}`, i.e. `~/scratchpad`).
+  (host `${MEMORY_SESSION}` → container `${MEMORY_MOUNT}`, i.e. `~/<agent>`).
   `cli.py` is the dynamic half: it injects per-session flags (`-v` project at
   `~/<name>`, `-w /home/agent`, `-e` env, secret `-e` names, `--name`). Compose
   stays agent/project-agnostic.
