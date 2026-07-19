@@ -18,7 +18,9 @@ fi
 
 # Run as the agent account with the launcher-injected env (KARAKUM_*, GIT_*,
 # SSH_AUTH_SOCK, TERM, COLORTERM, …) and HOME forced back to the account's home
-# (we entered as root, so HOME is /root) for ~/.bashrc + ~/.claude.
+# (we entered as root, so HOME is /root) for ~/.bashrc + ~/.claude. Not `exec`ed
+# below — `exec` needs a real program, not a shell function — so the final
+# handoff spells the same runuser call out.
 as_agent() { runuser -u "$target" -- env "HOME=/home/agent" "$@"; }
 
 # Optional per-agent setup hook: a shell command the launcher passed for the
@@ -30,4 +32,5 @@ if [ -n "${KARAKUM_MEMORY_INIT:-}" ]; then
         || echo "karakum: memory init hook failed (continuing): $KARAKUM_MEMORY_INIT" >&2
 fi
 
-exec as_agent "$@"
+# Drop root -> agent for the session command itself (see as_agent note above).
+exec runuser -u "$target" -- env "HOME=/home/agent" "$@"
