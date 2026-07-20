@@ -9,6 +9,7 @@ requires-python = ">=3.11"
 dependencies = [
     "click>=8",
     "pyyaml>=6",
+    "rich>=13",
 ]
 
 [project.scripts]

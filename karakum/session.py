@@ -1,8 +1,7 @@
 import subprocess
-import sys
 from pathlib import Path
 
-from karakum import config
+from karakum import config, console
 
 
 def ensure(repo: Path, agent: str, slug: str, role: str, repo_label: str, branch: str) -> Path:
@@ -41,16 +40,15 @@ def ensure(repo: Path, agent: str, slug: str, role: str, repo_label: str, branch
         # (a git worktree) or anything else means the path wasn't created by
         # karakum — fail loudly rather than mount an unusable dir.
         if (session / ".git").is_dir():
-            print(f"karakum: reusing {role} session: {repo_label} @ {branch}", file=sys.stderr)
+            console.info(f"reusing {role} session: {repo_label} @ {branch}")
             return session
-        print(
-            f"karakum: {session} exists but is not a karakum clone (no .git directory) — "
-            "refusing to use it. Remove it or pick another slug.",
-            file=sys.stderr,
+        console.error(
+            f"{session} exists but is not a karakum clone (no .git directory) — "
+            "refusing to use it. Remove it or pick another slug."
         )
         raise SystemExit(2)
 
-    print(f"karakum: creating {role} session: {repo_label} @ {branch}", file=sys.stderr)
+    console.info(f"creating {role} session: {repo_label} @ {branch}")
     session.parent.mkdir(parents=True, exist_ok=True)
 
     # The host repo's GitHub remote — set on the clone so the agent pushes to
@@ -86,5 +84,5 @@ def ensure(repo: Path, agent: str, slug: str, role: str, repo_label: str, branch
 
 
 def no_session_warning() -> None:
-    print("karakum: WARNING — no session slug given; running on main branch.", file=sys.stderr)
-    print("karakum: Changes here affect the live repo. Use a session slug for isolated work.", file=sys.stderr)
+    console.warn("WARNING — no session slug given; running on main branch.")
+    console.warn("Changes here affect the live repo. Use a session slug for isolated work.")

@@ -9,12 +9,11 @@ operates at the (agent, slug) granularity.
 import json
 import shutil
 import subprocess
-import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
-from karakum import config
+from karakum import config, console
 
 
 @dataclass(frozen=True)
@@ -188,5 +187,4 @@ def _reap_containers(session: Session) -> None:
     ids = listed.stdout.split()
     if ids:
         subprocess.run(["docker", "rm", *ids], capture_output=True, text=True)
-        print(f"karakum: reaped {len(ids)} exited container(s) for {session.agent}/{session.slug}",
-              file=sys.stderr)
+        console.info(f"reaped {len(ids)} exited container(s) for {session.agent}/{session.slug}")
