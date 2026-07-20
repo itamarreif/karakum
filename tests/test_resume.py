@@ -72,8 +72,8 @@ def test_resume_memory_only(monkeypatch):
     calls = _capture_launch(monkeypatch)
     res = CliRunner().invoke(cli.main, ["resume", "notes"])
     assert res.exit_code == 0, _text(res)
-    # _do_launch(toolchain, agent, project, slug, cmd, extra)
-    assert calls[0][:5] == ("claude", "alice", "-", "notes", "bash")
+    # _do_launch(agent, project, slug)
+    assert calls[0] == ("alice", "-", "notes")
 
 
 def test_resume_with_project_maps_label_to_name(monkeypatch):
@@ -82,7 +82,7 @@ def test_resume_with_project_maps_label_to_name(monkeypatch):
     calls = _capture_launch(monkeypatch)
     res = CliRunner().invoke(cli.main, ["resume", "fix-login"])
     assert res.exit_code == 0, _text(res)
-    assert calls[0][:4] == ("claude", "alice", "web", "fix-login")
+    assert calls[0] == ("alice", "web", "fix-login")
 
 
 def test_resume_multiple_projects_errors(monkeypatch):

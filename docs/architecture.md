@@ -20,7 +20,7 @@ Justfile recipe          →  shell command
 ─────────────────────────────────────────────────────────────
 just build               →  uv run karakum build           (Docker images)
 just install             →  uv pip install -e .            (install the CLI)
-just shell  A [P] [S]     →  uv run karakum launch claude A P S bash
+just shell  A [P] [S]     →  uv run karakum launch A P S   (shell in ~; run claude/codex/opencode there)
 just resume S            →  uv run karakum resume S        (reopen existing session by slug)
 just agents              →  uv run karakum agents
 just projects            →  uv run karakum projects
@@ -143,7 +143,7 @@ session_ls(agent?)                        session_rm(slug, --dry-run, --yes)
 ```
 
 `session clean` frees build artifacts without touching source or git state. It
-runs inside the bundled agent image (`karakum-agent-claude:latest`, so cargo /
+runs inside the bundled agent image (`karakum-agent:latest`, so cargo /
 npm / uv are present) over the session's host-mounted clones:
 
 ```
@@ -180,10 +180,10 @@ session_down(slug, --yes)
 
 ## `launch` flow (the main path)
 
-Driven by `just shell`. Args: `toolchain agent project slug cmd`.
+Driven by `just shell`. Args: `agent project slug`.
 
 ```
-cli.launch(toolchain, agent, project, slug, cmd_args)
+cli.launch(agent, project, slug)   →   _do_launch(agent, project, slug)
 │
 ├─1 preflight.check_tools()
 │      └─ shutil.which("docker")            # else SystemExit(2)
@@ -235,20 +235,25 @@ cli.launch(toolchain, agent, project, slug, cmd_args)
 │   ├─ env = os.environ | env_dict ; env["MEMORY_SESSION"]=memory_session ; env["MEMORY_MOUNT"]=~/<agent>
 │   └─ (secret values go into env; only "-e VAR" names hit the argv)
 │
-├─5 STATE (per-agent ~/.claude, host-owned)
-│   ├─ state_dir = config.state_root()/<agent> ; mkdir -p ; env["CLAUDE_STATE_DIR"]=state_dir
-│   └─ seed state_dir/.claude.json → hasCompletedOnboarding=true   # read-modify-write; skips claude's first-run wizard
+├─5 STATE (per-CLI, host-owned under config.state_root())
+│   ├─ claude   : <state_root>/<agent>              → ~/.claude               ; CLAUDE_STATE_DIR
+│   ├─ opencode : <state_root>/<agent>-opencode     → ~/.config/opencode      ; OPENCODE_CONFIG_DIR
+│   │             <state_root>/<agent>-opencode-data→ ~/.local/share/opencode ; OPENCODE_DATA_DIR
+│   ├─ codex    : <state_root>/<agent>-codex        → ~/.codex                ; CODEX_STATE_DIR
+│   ├─ mkdir -p each ; env[VAR]=dir
+│   ├─ seed <claude>/.claude.json → hasCompletedOnboarding=true   # read-modify-write; skips claude's first-run wizard
+│   └─ seed <opencode>/opencode.json (if absent) → default model + autoupdate:false   # skips opencode's model picker
 │
 ├─6 BUILD docker argv
 │   container_name = f"agent-{agent}-{slug_label}-{uuid4[:6]}"
 │   docker_cmd = ["docker","compose","run","--rm","--name",...,
-│                 "-e KARAKUM_SESSION/AGENT/TOOLCHAIN", "-e KARAKUM_MEMORY=~/<agent>", *init_args, *project_args,
+│                 "-e KARAKUM_SESSION/AGENT", "-e KARAKUM_MEMORY=~/<agent>", *init_args, *project_args,
 │                 *_git_identity_args(agent),            # GIT_AUTHOR/COMMITTER → agent (user+agent@host)
 │                 *_ssh_agent_args(),                    # forward host SSH agent (see docs/ssh.md)
 │                 *_git_signing_args(),                  # SSH commit signing via that agent
 │                 *_terminal_args(),                     # TERM + COLORTERM=truecolor
 │                 "-w", "/home/agent", *secret_docker_args,   # always land in ~
-│                 f"agent-{toolchain}", cmd, *extra_args]
+│                 "agent", "bash"]                       # single agent image; run claude/codex/opencode inside
 │
 └─7 HANDOFF
     ├─ os.chdir(manifest.karakum_root())    # so compose finds docker-compose.yaml
@@ -278,22 +283,23 @@ cli ─┬─► preflight ──► (subprocess: git; shutil: docker/gh)
 - **Single exec handoff.** `launch` does all host-side prep (manifests →
   preflight → clone → secrets → argv), then `os.execvpe` *replaces* the Python
   process with `docker compose run`. Nothing after the exec runs; the container's
-  `cmd` (`bash`, passed by the `shell` recipe) becomes the foreground process.
-  `launch` takes the `cmd` as a trailing argument, so a future recipe could exec
-  a different entry point (e.g. `claude`) through the same code path.
+  `cmd` (`bash`) becomes the foreground process, dropping the user into a shell in
+  `~`. One image carries `claude`, `codex`, and `opencode` on `PATH`; the user
+  runs whichever they want from that shell.
 
 - **Static vs dynamic contract.** `docker-compose.yaml` is the static half: it
-  declares the toolchain service, the `claude` state mount, and the memory mount
-  (host `${MEMORY_SESSION}` → container `${MEMORY_MOUNT}`, i.e. `~/<agent>`).
-  `cli.py` is the dynamic half: it injects per-session flags (`-v` project at
-  `~/<name>`, `-w /home/agent`, `-e` env, secret `-e` names, `--name`). Compose
-  stays agent/project-agnostic.
+  declares the single `agent` service, the per-CLI state mounts (claude
+  `~/.claude`, opencode `~/.config/opencode` + `~/.local/share/opencode`, codex
+  `~/.codex`), and the memory mount (host `${MEMORY_SESSION}` → container
+  `${MEMORY_MOUNT}`, i.e. `~/<agent>`). `cli.py` is the dynamic half: it injects
+  per-session flags (`-v` project at `~/<name>`, `-w /home/agent`, `-e` env,
+  secret `-e` names, `--name`). Compose stays agent/project-agnostic.
 
-- **Three orthogonal axes → three inputs.** toolchain (`agent-<toolchain>`
-  service/image) · agent (`<config_dir>/agents/<n>.yaml` → memory) · project
+- **Orthogonal axes → inputs.** CLI (claude/codex/opencode, chosen inside the
+  shell) · agent (`<config_dir>/agents/<n>.yaml` → memory) · project
   (`<config_dir>/projects/<n>.yaml`, optional). Secrets are host-wide
-  (`<config_dir>/secrets.yaml`), not an axis. `cli.launch` is where the three
-  combine.
+  (`<config_dir>/secrets.yaml`), not an axis. `cli.launch` is where agent +
+  project combine.
 
 - **Fail-loud preflight before side effects.** `check_tools` and `check_repo`
   run *before* any clone or secret resolution, so a bad manifest or missing

@@ -1,4 +1,4 @@
-# karakum compose: one service per toolchain image.
+# karakum compose: the single `agent` service (one image, three agent CLIs).
 # Mounts/env are declared here and parameterized by ${VARS} the launcher exports
 # (memory clone, per-agent ~/.claude state). The project clone (optional, so it
 # can't be a static line) and the variable-length secret set are the only things
@@ -7,10 +7,12 @@
 name: karakum
 
 services:
-  agent-claude:
+  # One image, three interchangeable agent CLIs on PATH (claude / codex /
+  # opencode) — the user picks one after `just shell`.
+  agent:
     build:
-      context: ./containers/claude
-    image: karakum-agent-claude:latest
+      context: ./containers/agent
+    image: karakum-agent:latest
     tty: true
     stdin_open: true
     environment:
@@ -25,6 +27,13 @@ services:
       # container never sees the external filesystem. `:-/dev/null` keeps `docker
       # compose build` from expanding to a bare `::rw` when the vars are unset.
       - ${MEMORY_SESSION:-/dev/null}:${MEMORY_MOUNT:-/dev/null}:rw
-      # Per-agent ~/.claude state: a host dir (agent-owned, writable, persistent),
-      # not a root-owned named volume. <state_root>/<agent>, default ~/.karakum/state.
+      # Per-CLI state, each a host dir (agent-owned, writable, persistent) under
+      # <state_root>/<agent> (default ~/.karakum/state). The `:-/dev/null` guards
+      # keep `docker compose build` working when the vars are unset.
+      #   claude   → ~/.claude
+      #   opencode → ~/.config/opencode (config) + ~/.local/share/opencode (data/auth)
+      #   codex    → ~/.codex
       - ${CLAUDE_STATE_DIR:-/dev/null}:/home/agent/.claude:rw
+      - ${OPENCODE_CONFIG_DIR:-/dev/null}:/home/agent/.config/opencode:rw
+      - ${OPENCODE_DATA_DIR:-/dev/null}:/home/agent/.local/share/opencode:rw
+      - ${CODEX_STATE_DIR:-/dev/null}:/home/agent/.codex:rw

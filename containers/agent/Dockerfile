@@ -41,8 +41,12 @@ COPY --from=karakum-toolchain-proto:latest /usr/local/bin/protoc      /usr/local
 COPY --from=karakum-toolchain-proto:latest /usr/local/bin/buf         /usr/local/bin/buf
 COPY --from=karakum-toolchain-proto:latest /usr/local/include/google /usr/local/include/google
 
-# --- agent harness ---
-RUN npm install -g @anthropic-ai/claude-code
+# --- agent harnesses ---
+# Three interchangeable agent CLIs live on PATH; the user picks one after
+# `just shell`. claude authenticates from CLAUDE_CODE_OAUTH_TOKEN (or
+# ANTHROPIC_API_KEY); opencode + codex read ANTHROPIC_API_KEY / OPENAI_API_KEY
+# from the environment (injected via the secrets pipeline).
+RUN npm install -g @anthropic-ai/claude-code opencode-ai @openai/codex
 
 # Stay root; the base image's entrypoint renames the `agent` account to the
 # launching agent and drops to it. Re-asserting `USER agent` here would bypass

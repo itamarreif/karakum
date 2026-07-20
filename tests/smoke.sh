@@ -9,7 +9,7 @@
 # Run via `just smoke` (needs `just build` first so the agent image exists).
 set -euo pipefail
 
-IMAGE="karakum-agent-claude:latest"
+IMAGE="karakum-agent:latest"
 AGENT="smoke"
 SLUG="smoketest"
 CONTAINER="agent-${AGENT}-${SLUG}-test"
@@ -19,6 +19,13 @@ fail() { echo "SMOKE FAIL: $*" >&2; exit 1; }
 command -v docker >/dev/null 2>&1 || fail "docker not on PATH"
 docker image inspect "$IMAGE" >/dev/null 2>&1 \
   || fail "image $IMAGE missing — run \`just build\` first"
+
+echo "== agent CLIs on PATH =="
+for cli in claude codex opencode; do
+  docker run --rm "$IMAGE" bash -lc "command -v $cli" >/dev/null 2>&1 \
+    || fail "$cli not on PATH in $IMAGE"
+done
+echo "  OK: claude, codex, opencode all present"
 
 WORK="$(mktemp -d)"
 cleanup() {

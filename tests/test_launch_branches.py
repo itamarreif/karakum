@@ -11,6 +11,7 @@ This is the behavior the launcher is responsible for; `session.ensure` does the
 real clone + checkout, so the assertions read live git state, not a mock.
 """
 import subprocess
+from pathlib import Path
 
 from click.testing import CliRunner
 
@@ -80,7 +81,7 @@ def test_project_and_memory_get_distinct_namespaces(monkeypatch, tmp_path):
     _mkrepo(proj)
     _wire(monkeypatch, tmp_path, mem, proj)
 
-    res = CliRunner().invoke(cli.main, ["launch", "claude", "alice", "webapp", "fix-login", "bash"])
+    res = CliRunner().invoke(cli.main, ["launch", "alice", "webapp", "fix-login"])
     assert isinstance(res.exception, _Exec), res.output  # reached the docker handoff
 
     clones = _clones(tmp_path, "alice", "fix-login")
@@ -101,7 +102,7 @@ def _capture_exec(monkeypatch):
     return captured
 
 
-def test_mount_at_agent_home_plus_toolchain_and_init_hook(monkeypatch, tmp_path):
+def test_mount_at_agent_home_plus_service_and_init_hook(monkeypatch, tmp_path):
     mem, proj = tmp_path / "src_mem", tmp_path / "src_proj"
     _mkrepo(mem)
     _mkrepo(proj)
@@ -120,15 +121,15 @@ def test_mount_at_agent_home_plus_toolchain_and_init_hook(monkeypatch, tmp_path)
     monkeypatch.setattr(cli.manifest, "load", load)
     captured = _capture_exec(monkeypatch)
 
-    res = CliRunner().invoke(cli.main, ["launch", "claude", "alice", "webapp", "fix-login", "bash"])
+    res = CliRunner().invoke(cli.main, ["launch", "alice", "webapp", "fix-login"])
     assert isinstance(res.exception, _Exec), res.output
 
     argv = captured["argv"]
     # The vault mounts at ~/<agent>, not ~/scratchpad (no doubled scratchpad/).
     assert "KARAKUM_MEMORY=/home/agent/alice" in argv
     assert captured["env"]["MEMORY_MOUNT"] == "/home/agent/alice"
-    # The toolchain is exposed so a hook can pick a toolchain-specific destination.
-    assert "KARAKUM_TOOLCHAIN=claude" in argv
+    # One image with every CLI: the compose service is the neutral `agent`.
+    assert "agent" in argv
     # The init hook is passed through verbatim.
     assert f"KARAKUM_MEMORY_INIT={hook}" in argv
 
@@ -140,7 +141,7 @@ def test_no_init_env_when_hook_unset(monkeypatch, tmp_path):
     _wire(monkeypatch, tmp_path, mem, proj)
     captured = _capture_exec(monkeypatch)
 
-    res = CliRunner().invoke(cli.main, ["launch", "claude", "alice", "-", "notes", "bash"])
+    res = CliRunner().invoke(cli.main, ["launch", "alice", "-", "notes"])
     assert isinstance(res.exception, _Exec), res.output
     assert not any(str(a).startswith("KARAKUM_MEMORY_INIT=") for a in captured["argv"])
 
@@ -151,8 +152,56 @@ def test_memory_only_session_uses_bare_slug(monkeypatch, tmp_path):
     _mkrepo(proj)
     _wire(monkeypatch, tmp_path, mem, proj)
 
-    res = CliRunner().invoke(cli.main, ["launch", "claude", "alice", "-", "fix-login", "bash"])
+    res = CliRunner().invoke(cli.main, ["launch", "alice", "-", "fix-login"])
     assert isinstance(res.exception, _Exec), res.output
 
     clones = _clones(tmp_path, "alice", "fix-login")
     assert clones == {"scratchpad": "fix-login"}  # no project clone; memory on a bare slug
+
+
+def test_per_cli_state_dirs_created_and_opencode_seeded(monkeypatch, tmp_path):
+    """Each agent CLI gets its own persistent host state dir + env var, and
+    opencode's config is seeded once so it skips the first-run model picker."""
+    import json as _json
+
+    mem, proj = tmp_path / "src_mem", tmp_path / "src_proj"
+    _mkrepo(mem)
+    _mkrepo(proj)
+    _wire(monkeypatch, tmp_path, mem, proj)
+    captured = _capture_exec(monkeypatch)
+
+    res = CliRunner().invoke(cli.main, ["launch", "alice", "-", "notes"])
+    assert isinstance(res.exception, _Exec), res.output
+
+    state = tmp_path / "data" / "state"
+    env = captured["env"]
+    # claude keeps the bare <state_root>/<agent> path; the others hang off it.
+    assert env["CLAUDE_STATE_DIR"] == str(state / "alice")
+    assert env["OPENCODE_CONFIG_DIR"] == str(state / "alice-opencode")
+    assert env["OPENCODE_DATA_DIR"] == str(state / "alice-opencode-data")
+    assert env["CODEX_STATE_DIR"] == str(state / "alice-codex")
+    for var in ("CLAUDE_STATE_DIR", "OPENCODE_CONFIG_DIR", "OPENCODE_DATA_DIR", "CODEX_STATE_DIR"):
+        assert Path(env[var]).is_dir(), f"{var} dir not created"
+
+    seed = _json.loads((state / "alice-opencode" / "opencode.json").read_text())
+    assert seed["model"] == "anthropic/claude-sonnet-4-5"
+    assert seed["autoupdate"] is False
+
+
+def test_opencode_seed_not_clobbered_when_present(monkeypatch, tmp_path):
+    """A pre-existing opencode.json (user's own model switch) is left untouched."""
+    import json as _json
+
+    mem, proj = tmp_path / "src_mem", tmp_path / "src_proj"
+    _mkrepo(mem)
+    _mkrepo(proj)
+    _wire(monkeypatch, tmp_path, mem, proj)
+    _capture_exec(monkeypatch)
+
+    oc = tmp_path / "data" / "state" / "alice-opencode"
+    oc.mkdir(parents=True)
+    (oc / "opencode.json").write_text(_json.dumps({"model": "openai/gpt-5"}))
+
+    res = CliRunner().invoke(cli.main, ["launch", "alice", "-", "notes"])
+    assert isinstance(res.exception, _Exec), res.output
+    assert _json.loads((oc / "opencode.json").read_text()) == {"model": "openai/gpt-5"}

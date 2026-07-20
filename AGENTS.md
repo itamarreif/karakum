@@ -8,17 +8,17 @@ This file uses [AGENTS.md](https://agents.md/) — the harness-agnostic conventi
 
 karakum decouples three things that older agent systems conflate:
 
-1. **Toolchain** = which container image runs (`claude`, future `codex`, `opencode`, `pi`, `secret-manager`, …). Toolchain-specific, **not** agent-specific. Selected by the recipe: `just shell <agent> <project> <slug>` runs the claude toolchain image; a future `just codex …` recipe would run the same agent on codex.
-2. **Agent** = identity. Has a name + memory (the persistent self: skills, scratchpad, master prompt). Declared in `agents/<name>.yaml`. **No** toolchain field, **no** project field — agents are portable across both. Secrets are host-wide, not per-agent (declared once in `secrets.yaml`). The harness state (`~/.claude`) persists in a per-agent host dir (`<state_root>/<agent>`, default `~/.karakum/state`).
+1. **CLI** = which agent you drive. The single agent image carries `claude`, `codex`, and `opencode` on `PATH`; you pick one **inside** the session shell — it is not a launch argument. (The image's build toolchains — node/python/rust/proto — are pinned in `toolchains.yaml`.)
+2. **Agent** = identity. Has a name + memory (the persistent self: skills, scratchpad, master prompt). Declared in `agents/<name>.yaml`. **No** CLI field, **no** project field — agents are portable across both. Secrets are host-wide, not per-agent (declared once in `secrets.yaml`). Each CLI's state persists in a per-agent host dir under `<state_root>` (default `~/.karakum/state`): claude `~/.claude`, opencode `~/.config/opencode` + `~/.local/share/opencode`, codex `~/.codex`.
 3. **Project** = the workspace the agent acts on for this session. Declared in `projects/<name>.yaml`. Optional per session. Same agent can work on different projects across sessions.
 
-A session = (toolchain × agent × project? × session-slug). The launcher mounts the agent's memory clone and (if specified) the project clone in independent clones of their respective repos. Branches are namespaced per role: the project clone is on `<agent>/<slug>`, the memory clone on `<project>/<slug>` (or a bare `<slug>` when there's no project).
+A session = (agent × project? × session-slug), with the CLI chosen at the shell. The launcher mounts the agent's memory clone and (if specified) the project clone in independent clones of their respective repos. Branches are namespaced per role: the project clone is on `<agent>/<slug>`, the memory clone on `<project>/<slug>` (or a bare `<slug>` when there's no project).
 
 ## Layout
 
 ```
 karakum/                    # THIS REPO — version-controlled, generic
-  containers/<toolchain>/   Docker images. Toolchain-specific, not agent-specific.
+  containers/               Docker images: base, toolchain-* layers, and agent/ (base + toolchains + claude/codex/opencode).
   Justfile                  Host entry point: thin recipes dispatching to the CLI.
   karakum/                  Python CLI package (uv pip install -e . or uv run karakum).
     cli.py                  Entry point: launch, resume, pngpaste, build, agents, projects, session group (ls / rm / clean / down).
@@ -28,7 +28,7 @@ karakum/                    # THIS REPO — version-controlled, generic
     session.py              Per-session isolated clone lifecycle.
     cleanup.py              Session listing (iter_sessions, pr_states) + remove.
   examples/                 Genericized seed config (agents/, projects/, secrets.yaml, toolchains.yaml) → copy into the config dir.
-  docker-compose.yaml       One service per toolchain.
+  docker-compose.yaml       The single `agent` service (mount + env contract).
   pyproject.toml            Python package definition; deps: click, pyyaml.
 
 $KARAKUM_CONFIG_DIR/        # YOUR CONFIG (default ~/.config/karakum) — NOT in this repo
@@ -71,12 +71,13 @@ Orchestration logic lives in the Python package (`karakum/`) — including Docke
 
 - Mount paths inside the container mirror host paths exactly.
 - Session clones (memory + project) are bind-mounted at runtime; the host repos' `.git` is never mounted, so a session can't reach the host's branches/refs/config.
-- New toolchain = new `containers/<name>/Dockerfile` + new compose service + new Justfile recipe. No agent or project changes.
+- New agent CLI = add it to `containers/agent/Dockerfile` (on `PATH`) + persist its state dir in `_do_launch` + mount it in `docker-compose.yaml`. No new service/recipe — it's one image.
+- New build toolchain = new `containers/toolchain-<name>/Dockerfile` + entry in `toolchains.yaml` + COPY into `containers/agent/Dockerfile` + build step in `cli.build`.
 - New agent = new `agents/<name>.yaml`. No code changes.
 - New project = new `projects/<name>.yaml`. No code changes.
 - New secret provider = one function + one dict entry in `karakum/secrets.py`. See the comment block there.
 - **No service ever publishes ports to the host.** All ingress flows through a Tailscale sidecar.
-- Tier-1 hardening (`cap_drop: ALL`, `no-new-privileges`, `read_only: true` + tmpfs, `pids_limit`, `mem_limit`) lands as a follow-up commit on the toolchain image / compose service.
+- Tier-1 hardening (`cap_drop: ALL`, `no-new-privileges`, `read_only: true` + tmpfs, `pids_limit`, `mem_limit`) lands as a follow-up commit on the `agent` compose service.
 
 ## Don't
 

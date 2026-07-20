@@ -32,9 +32,10 @@ smoke:
     bash tests/smoke.sh
 
 # Use '-' for <project> (memory-only) or <slug> (run on main branch).
-# Drop into a session shell: just shell <agent> <project> <slug>
+# Drop into a session shell (in ~): just shell <agent> <project> <slug>
+# Then run whichever agent CLI you want: claude, codex, or opencode.
 shell agent project="-" slug="-":
-    uv run karakum launch claude {{agent}} {{project}} {{slug}} bash
+    uv run karakum launch {{agent}} {{project}} {{slug}}
 
 # Reopen an existing session by slug (agent + project recovered from disk):
 # just resume <slug>  — or <agent>/<slug> if the slug exists under >1 agent.

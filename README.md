@@ -8,12 +8,14 @@ Container infra for AI agents.
 
 karakum decouples:
 
-1. **Toolchain** (which container image runs) — `containers/<toolchain>/`. Selected at invocation.
-2. **Agent** (identity: memory) — `<config-dir>/agents/<name>.yaml`. Decoupled from toolchain and project.
+1. **CLI** (which agent you drive) — the one agent image carries `claude`, `codex`,
+   and `opencode` on `PATH`; pick one inside the session shell. (The image's build
+   toolchains — node/python/rust/proto — come from `toolchains.yaml`.)
+2. **Agent** (identity: memory) — `<config-dir>/agents/<name>.yaml`. Decoupled from CLI and project.
 3. **Project** (workspace the agent acts on) — `<config-dir>/projects/<name>.yaml`. Optional per session.
 
 ```
-just shell <agent> <project> <slug>
+just shell <agent> <project> <slug>  # drops you in a shell in ~; then run claude / codex / opencode
 just shell alice webapp fix-login    # agent=alice on project=webapp, session slug=fix-login
 just shell alice - organize-notes    # no project (memory only) — '-' skips the project
 just shell alice - -                 # no slug → runs on main branch (with disclaimer)
@@ -38,7 +40,8 @@ secrets.yaml             Host-wide secret references (op://…, env://…), neve
 
 # DATA ($KARAKUM_DATA_DIR, default ~/.karakum) — large, regenerable, NOT in dotfiles
 sessions/<agent>/<slug>/<label>/   Isolated git clones, one tree per session.
-state/<agent>/                     Persistent ~/.claude per agent (auth/trust/caches).
+state/<agent>/...                  Persistent per-agent CLI state (claude ~/.claude,
+                                   opencode/codex configs — auth/trust/caches).
 ```
 
 The split lets the repo be shared: nothing machine-specific (local paths,
@@ -51,7 +54,8 @@ version control. Within the data dir, `config.yaml` can redirect `sessions_root`
 
 ```
 karakum/
-  containers/<toolchain>/   Docker images. Toolchain-specific.
+  containers/               Docker images: base, per-language toolchain-* layers,
+                            and agent/ (base + toolchains + the three agent CLIs).
   examples/                 Sample agents/, projects/, secrets.yaml, toolchains.yaml — copy into config dir.
   Justfile                  Host entry point — thin recipes dispatching to the CLI.
   karakum/                  Python CLI package (install with `just install`).
@@ -62,14 +66,14 @@ karakum/
     secrets.py              Secret resolution (op://, env://).
     session.py              Per-session isolated clone lifecycle.
     cleanup.py              Session enumeration + remove logic.
-  docker-compose.yaml       One service per toolchain.
+  docker-compose.yaml       The `agent` service (image + mount/env contract).
   docs/architecture.md      CLI structure + per-command call graphs.
   docs/configuration.md     The three-location config model.
   pyproject.toml            Python package definition.
 ```
 
-Adding a new agent / project / toolchain is a one-file change in the config dir.
-The three are independent.
+Adding a new agent or project is a one-file change in the config dir. Agent, CLI,
+and project are independent.
 
 For how the CLI is wired together — modules, command dispatch, and the `launch` call graph — see [docs/architecture.md](docs/architecture.md).
 
@@ -114,17 +118,19 @@ export KARAKUM_DATA_DIR=~/.karakum             # (default) session clones + harn
 just install                                         # install the karakum CLI (once, or after edits)
 # or, to put `karakum` on PATH while keeping the repo as the home of the code:
 uv tool install --editable .                         # editable install — still imports from this checkout
-just build                                           # build base + claude images (~5-10 min)
-claude setup-token                                   # one-time (host): make an OAuth token → reference as CLAUDE_CODE_OAUTH_TOKEN in secrets.yaml
+just build                                           # build base + toolchain + agent image (~5-10 min)
+claude setup-token                                   # one-time (host): OAuth token → CLAUDE_CODE_OAUTH_TOKEN in secrets.yaml (or use ANTHROPIC_API_KEY)
 just shell <agent> - <slug>                          # memory-only session (note-taking, organizing, etc.)
 just shell <agent> <project> <slug>                  # session that also has <project> mounted RW
 just shell <agent> - -                               # no slug: run on main branch (shows disclaimer)
 just resume <slug>                                   # reopen an existing session by slug (agent + project recovered from disk)
 ```
 
-The container is the `claude` toolchain image, so `claude` is on `PATH` — `just
-shell` drops you at a prompt in the session home; run `claude` there to start the
-agent, or work in the shell directly.
+The image carries three agent CLIs on `PATH` — `claude`, `codex`, and `opencode`.
+`just shell` drops you at a prompt in the session home (`~`); run whichever agent
+you want there, or work in the shell directly. `claude` authenticates from
+`CLAUDE_CODE_OAUTH_TOKEN` (or `ANTHROPIC_API_KEY`); `codex` and `opencode` read
+`OPENAI_API_KEY` / `ANTHROPIC_API_KEY` — all supplied via `secrets.yaml` (below).
 
 `uv tool install --editable .` keeps the installed `karakum` importing from this
 checkout, so `karakum_root()` still resolves to the repo where
@@ -166,7 +172,7 @@ The branch column folds in dirty (`*`) and unpushed (`↑N`) state; note the two
 
 Flags: `--dry-run` (show what would be removed, delete nothing), `--yes` (skip the confirmation prompt).
 
-`just session-clean <slug>` reclaims disk **without** deleting the clone — handy when several sessions fill the disk and `session-rm` is too destructive for in-progress work. It runs each toolchain's clean command inside the agent image over the session's clones (so `cargo`/`npm`/`uv` are available), removing only regenerable build artifacts — source and git state are untouched. For each clone, a project that declares a `clean:` list in its manifest runs exactly those commands; otherwise every toolchain in `toolchains.yaml` whose `detect` command succeeds (e.g. `test -f Cargo.toml`) runs its `clean` (e.g. `cargo clean`). Use a project `clean:` for monorepos whose build dirs are nested (e.g. `cd webapp && npm run clean …`), since autodetect only checks the clone root. `--dry-run` prints the generated script and docker command without running anything. (Requires `just build` first, so the `karakum-agent-claude` image exists.)
+`just session-clean <slug>` reclaims disk **without** deleting the clone — handy when several sessions fill the disk and `session-rm` is too destructive for in-progress work. It runs each toolchain's clean command inside the agent image over the session's clones (so `cargo`/`npm`/`uv` are available), removing only regenerable build artifacts — source and git state are untouched. For each clone, a project that declares a `clean:` list in its manifest runs exactly those commands; otherwise every toolchain in `toolchains.yaml` whose `detect` command succeeds (e.g. `test -f Cargo.toml`) runs its `clean` (e.g. `cargo clean`). Use a project `clean:` for monorepos whose build dirs are nested (e.g. `cd webapp && npm run clean …`), since autodetect only checks the clone root. `--dry-run` prints the generated script and docker command without running anything. (Requires `just build` first, so the `karakum-agent` image exists.)
 
 `just session-down <slug>` stops the running `agent-<agent>-<slug>-*` container(s) — for killing a stuck or runaway session (e.g. a type-checker spinning for too long) — without deleting the clone. Containers run with `--rm`, so stopping them removes them. Confirms first; `--yes` skips the prompt.
 
@@ -185,9 +191,9 @@ Session clones mount **under the container home (`~`)**, never at their host pat
 - **Project session clone** (if a project is specified) at host `<sessions_root>/<agent>/<slug>/<project>/`, mounted **RW** at `~/<project>` (the repo name).
 - **CWD** inside the container = `~` (home); the memory clone and project sit as siblings under it.
 - **User**: the baked `agent` account is renamed at runtime to the launching agent (e.g. `alice`) by the image entrypoint, so `whoami`/`\u`/new-file ownership read the agent name. Home stays `/home/agent`.
-- **`~/.claude/`** inside the container is bind-mounted from a per-agent host dir `<state_root>/<agent>` (default `<data_dir>/state`, i.e. `~/.karakum/state`), so settings/trust/history persist across runs and the dir stays host-owned (agent-writable, inspectable).
-- **Setup hook** (optional): an agent's `memory.init` command runs in-container after the mounts land (see [configuration](docs/configuration.md)) — e.g. to link the memory framework's master prompt into `~/.claude/CLAUDE.md`.
-- **Env vars**: `KARAKUM_MEMORY` (`~/<agent>`), `KARAKUM_PROJECT` (`~/<project>`, when set), `KARAKUM_TOOLCHAIN`, `KARAKUM_SESSION`, `KARAKUM_AGENT`.
+- **Per-CLI state** is bind-mounted from per-agent host dirs under `<state_root>` (default `<data_dir>/state`, i.e. `~/.karakum/state`), so each CLI's settings/auth/trust/history persist across runs and stay host-owned (agent-writable, inspectable): `claude` → `~/.claude` (`<state_root>/<agent>`); `opencode` → `~/.config/opencode` + `~/.local/share/opencode`; `codex` → `~/.codex`. opencode's config is seeded once with a default model so it skips the first-run picker.
+- **Setup hook** (optional): an agent's `memory.init` command runs in-container after the mounts land (see [configuration](docs/configuration.md)) — e.g. to link the memory framework's master prompt into each CLI's instruction file (`~/.claude/CLAUDE.md`, `~/.config/opencode/AGENTS.md`, `~/.codex/AGENTS.md`).
+- **Env vars**: `KARAKUM_MEMORY` (`~/<agent>`), `KARAKUM_PROJECT` (`~/<project>`, when set), `KARAKUM_SESSION`, `KARAKUM_AGENT`.
 
 The agent sees **only** its memory clone and (if specified) project clone — nothing else from the broader filesystem. Crucially, the **host repos' `.git` directories are never mounted**: each session is a standalone clone, so the agent cannot read or rewrite the host's branches, refs, config, or hooks. Both source repos must be git repos with `origin` remotes matching the manifest's `repository` field; the launcher fails loudly otherwise, and repoints each clone's `origin` at that remote so the agent pushes to GitHub.
 
@@ -197,16 +203,20 @@ In-container `git push`/`pull` authenticate over SSH via your **forwarded host S
 
 ## Secrets
 
-Secrets are declared **host-wide** in `<config-dir>/secrets.yaml` as URI references, shared across all agents and toolchains. The launcher resolves each at session start via the registered provider and injects them as env vars (`-e VAR`, name only — the value never touches the command line) into the container.
+Secrets are declared **host-wide** in `<config-dir>/secrets.yaml` as URI references, shared across all agents and CLIs. The launcher resolves each at session start via the registered provider and injects them as env vars (`-e VAR`, name only — the value never touches the command line) into the container.
 
 ```yaml
 # <config-dir>/secrets.yaml
 secrets:
   GH_TOKEN: env://GH_TOKEN                        # passthrough from host shell env (portable)
   CLAUDE_CODE_OAUTH_TOKEN: op://Personal/karakum claude code oauth token/credential  # 1Password
+  ANTHROPIC_API_KEY: op://Work/Anthropic/key      # codex/opencode (and claude, if you skip the OAuth token)
+  OPENAI_API_KEY: op://Work/OpenAI/key            # codex + opencode
 ```
 
-Claude Code authenticates from `CLAUDE_CODE_OAUTH_TOKEN` (above) — interactive `/login` doesn't work reliably in the container. The launcher also seeds `hasCompletedOnboarding` in the per-agent `~/.claude` state dir so claude skips the first-run wizard and starts straight in; settings, trusted folders, and history then persist in that host dir across runs.
+> `ANTHROPIC_API_KEY` is injected into every session, so `claude` may bill against it instead of the `CLAUDE_CODE_OAUTH_TOKEN` subscription. Keep only the one you want claude to use.
+
+Claude Code authenticates from `CLAUDE_CODE_OAUTH_TOKEN` (above) — interactive `/login` doesn't work reliably in the container. The launcher also seeds `hasCompletedOnboarding` in the per-agent `~/.claude` state dir so claude skips the first-run wizard and starts straight in; settings, trusted folders, and history then persist in that host dir across runs. `codex` and `opencode` authenticate from `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` in the same way — no interactive login — and opencode's seeded config skips its model picker.
 
 **Registered providers** (`karakum/secrets.py`):
 - `op://<vault>/<item>/<field>` — 1Password via `op read`.
