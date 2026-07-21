@@ -48,6 +48,15 @@ COPY --from=karakum-toolchain-proto:latest /usr/local/include/google /usr/local/
 # from the environment (injected via the secrets pipeline).
 RUN npm install -g @anthropic-ai/claude-code opencode-ai @openai/codex
 
+# opencode/codex follow the XDG base-dir spec and create ~/.config, ~/.local/share,
+# and ~/.local/state at startup. compose bind-mounts *nested* paths under these
+# (~/.config/opencode, ~/.local/share/opencode); Docker would otherwise auto-create
+# the parents (~/.local, ~/.local/share) root-owned, and the dropped-privilege agent
+# user couldn't then create a sibling like ~/.local/state → EACCES. Pre-create the
+# parents agent-owned so the mounts land inside writable dirs.
+RUN mkdir -p /home/agent/.config /home/agent/.local/share /home/agent/.local/state \
+ && chown -R agent:agent /home/agent/.local /home/agent/.config
+
 # Stay root; the base image's entrypoint renames the `agent` account to the
 # launching agent and drops to it. Re-asserting `USER agent` here would bypass
 # that and break the rename.
