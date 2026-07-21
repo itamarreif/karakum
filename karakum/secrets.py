@@ -22,12 +22,12 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import uuid
 from typing import Tuple
 
 import yaml
 
+from karakum import console
 from karakum.manifest import config_dir
 
 
@@ -40,7 +40,7 @@ def _resolve_op(refs: dict) -> dict:
     (newlines included) round-trips unambiguously.
     """
     if not shutil.which("op"):
-        print("karakum: 'op' not on PATH (brew install 1password-cli; then 'op signin')", file=sys.stderr)
+        console.error("'op' not on PATH (brew install 1password-cli; then 'op signin')")
         raise SystemExit(2)
     boundary = uuid.uuid4().hex
     template = "".join(
@@ -48,13 +48,13 @@ def _resolve_op(refs: dict) -> dict:
     )
     result = subprocess.run(["op", "inject"], input=template, capture_output=True, text=True)
     if result.returncode != 0:
-        print(f"karakum: op inject failed: {result.stderr.strip()}", file=sys.stderr)
+        console.error(f"op inject failed: {result.stderr.strip()}")
         raise SystemExit(2)
     resolved = {}
     for var in refs:
         m = re.search(rf"{boundary}:{re.escape(var)}:(.*?):{boundary}", result.stdout, re.DOTALL)
         if m is None:
-            print(f"karakum: could not resolve op secret '{var}' from op inject output", file=sys.stderr)
+            console.error(f"could not resolve op secret '{var}' from op inject output")
             raise SystemExit(2)
         resolved[var] = m.group(1).rstrip("\n")
     return resolved
@@ -64,7 +64,7 @@ def _provider_env(ref: str) -> str:
     var = ref[len("env://"):]
     value = os.environ.get(var, "")
     if not value:
-        print(f"karakum: env var '{var}' is unset or empty (ref: {ref})", file=sys.stderr)
+        console.error(f"env var '{var}' is unset or empty (ref: {ref})")
         raise SystemExit(2)
     return value
 
@@ -100,7 +100,7 @@ def load() -> Tuple[dict, list]:
     op_refs: dict = {}
     for var, ref in _load_refs().items():
         if "://" not in ref:
-            print(f"karakum: malformed secret reference (no scheme): {ref}", file=sys.stderr)
+            console.error(f"malformed secret reference (no scheme): {ref}")
             raise SystemExit(2)
         scheme = ref.split("://", 1)[0]
         if scheme == "op":
@@ -108,8 +108,8 @@ def load() -> Tuple[dict, list]:
         else:
             provider = _PROVIDERS.get(scheme)
             if provider is None:
-                print(f"karakum: no provider registered for scheme '{scheme}' (ref: {ref})", file=sys.stderr)
-                print(f"        registered schemes: {', '.join(['op', *_PROVIDERS])}", file=sys.stderr)
+                console.error(f"no provider registered for scheme '{scheme}' (ref: {ref})")
+                console.detail(f"registered schemes: {', '.join(['op', *_PROVIDERS])}")
                 raise SystemExit(2)
             env_dict[var] = provider(ref)
         docker_args.extend(["-e", var])

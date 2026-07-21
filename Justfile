@@ -57,7 +57,7 @@ projects:
 
 # List session clones + status: just sessions [<agent>]
 sessions agent="":
-    uv run karakum session ls {{agent}} | column -t
+    uv run karakum session ls {{agent}}
 
 # Remove a session directory: just session-rm <slug> [--dry-run] [--yes]
 # <slug> may be qualified as <agent>/<slug> if it exists under more than one agent.

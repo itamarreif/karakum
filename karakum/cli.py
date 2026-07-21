@@ -11,7 +11,7 @@ from pathlib import Path
 
 import click
 
-from karakum import cleanup, config, manifest, preflight
+from karakum import cleanup, config, console, manifest, preflight
 from karakum import secrets as ksecrets
 from karakum import session as ksession
 
@@ -371,31 +371,35 @@ def pngpaste(agent, slug, name):
 
 
 @main.command("agents")
-def agents():
+@click.option("--plain", is_flag=True, default=None, help="Force plain TSV output.")
+def agents(plain):
     """List configured agents."""
     agents_dir = manifest.config_dir() / "agents"
-    if not agents_dir.exists():
-        return
-    for path in sorted(agents_dir.glob("*.yaml")):
-        data = manifest.load(path)
-        name = manifest.get(data, "name") or path.stem
-        mem_path = manifest.get(data, "memory.path") or ""
-        mem_repo = manifest.get(data, "memory.repository") or ""
-        print(f"{name}\t{mem_path}\t{mem_repo}")
+    rows = []
+    if agents_dir.exists():
+        for path in sorted(agents_dir.glob("*.yaml")):
+            data = manifest.load(path)
+            name = manifest.get(data, "name") or path.stem
+            mem_path = manifest.get(data, "memory.path") or ""
+            mem_repo = manifest.get(data, "memory.repository") or ""
+            rows.append((name, mem_path, mem_repo))
+    console.render_table(["name", "memory.path", "memory.repository"], rows, plain=plain)
 
 
 @main.command("projects")
-def projects():
+@click.option("--plain", is_flag=True, default=None, help="Force plain TSV output.")
+def projects(plain):
     """List configured projects."""
     projects_dir = manifest.config_dir() / "projects"
-    if not projects_dir.exists():
-        return
-    for path in sorted(projects_dir.glob("*.yaml")):
-        data = manifest.load(path)
-        name = manifest.get(data, "name") or path.stem
-        proj_path = manifest.get(data, "path") or ""
-        repo = manifest.get(data, "repository") or ""
-        print(f"{name}\t{proj_path}\t{repo}")
+    rows = []
+    if projects_dir.exists():
+        for path in sorted(projects_dir.glob("*.yaml")):
+            data = manifest.load(path)
+            name = manifest.get(data, "name") or path.stem
+            proj_path = manifest.get(data, "path") or ""
+            repo = manifest.get(data, "repository") or ""
+            rows.append((name, proj_path, repo))
+    console.render_table(["name", "path", "repository"], rows, plain=plain)
 
 
 @main.command("build")
@@ -425,16 +429,16 @@ def build():
         try:
             subprocess.run(cmd, check=True)
         except subprocess.CalledProcessError as e:
-            print(f"karakum: build failed ({' '.join(cmd)})", file=sys.stderr)
+            console.error(f"build failed ({' '.join(cmd)})")
             raise SystemExit(e.returncode)
 
-    print("karakum: building base image", file=sys.stderr)
+    console.info("building base image")
     run(["docker", "build", "-t", "karakum-base:latest",
          "--build-arg", f"HOST_UID={os.getuid()}",
          "--build-arg", f"HOST_GID={os.getgid()}",
          str(root / "containers/base")])
 
-    print("karakum: building toolchain images", file=sys.stderr)
+    console.info("building toolchain images")
     run(["docker", "build",
          "--build-arg", f"NODE_VERSION={node_version}",
          "--build-arg", f"NODE_TOOLS={node_tools}",
@@ -453,7 +457,7 @@ def build():
          "--build-arg", f"BUF_VERSION={buf_version}",
          "-t", "karakum-toolchain-proto:latest", str(root / "containers/toolchain-proto")])
 
-    print("karakum: building agent images via compose", file=sys.stderr)
+    console.info("building agent images via compose")
     os.chdir(root)
     run(["docker", "compose", "build"])
 
@@ -558,9 +562,35 @@ def _clean_script(clones, builtins: list[tuple[str, str]],
     return "\n".join(lines)
 
 
+def _pr_style(pr: str) -> "str | None":
+    """Color a PR-state cell (human mode only): open green, merged magenta, none dim."""
+    if pr.startswith("#"):
+        return "green"
+    if pr == "merged":
+        return "magenta"
+    if pr in ("no-pr", "?"):
+        return "dim"
+    return None  # closed / other states keep the default color
+
+
+def _branch_style(branch: str) -> "str | None":
+    """Highlight a branch cell that carries a dirty (*) or unpushed (↑) marker."""
+    return "yellow" if ("*" in branch or "↑" in branch) else None
+
+
+def _repo_slug(url: str) -> str:
+    """`owner/repo` from a git remote URL, for compact error lines."""
+    s = url.rstrip("/")
+    if s.endswith(".git"):
+        s = s[:-4]
+    parts = [p for p in s.replace(":", "/").split("/") if p]
+    return "/".join(parts[-2:]) if len(parts) >= 2 else s
+
+
 @session_group.command("ls")
 @click.argument("agent", required=False)
-def session_ls(agent):
+@click.option("--plain", is_flag=True, default=None, help="Force plain TSV output.")
+def session_ls(agent, plain):
     """List session clones and their status (one row per clone).
 
     Columns: agent  label  slug  pr-state  branch
@@ -571,16 +601,17 @@ def session_ls(agent):
     found = cleanup.iter_sessions(agent)
     if not found:
         where = f" for agent '{agent}'" if agent else ""
-        print(f"karakum: no sessions{where} under {config.sessions_root()}", file=sys.stderr)
+        console.warn(f"no sessions{where} under {config.sessions_root()}")
         return
 
     all_clones = [c for s in found for c in s.clones]
     have_gh = bool(shutil.which("gh"))
+    pr_errors: dict[str, str] = {}  # origin url → why its gh lookup failed
 
     # Fetch git status for all clones in parallel, and gh PR states in one call per repo.
     with ThreadPoolExecutor(max_workers=8) as pool:
         git_futures = {pool.submit(cleanup.clone_status, c): c for c in all_clones}
-        pr_future = pool.submit(cleanup.pr_states, all_clones) if have_gh else None
+        pr_future = pool.submit(cleanup.pr_states, all_clones, pr_errors) if have_gh else None
 
         git_results: dict[cleanup.Clone, tuple[bool, int]] = {}
         for fut in git_futures:
@@ -588,12 +619,29 @@ def session_ls(agent):
 
         pr_map: dict[str, str] = pr_future.result() if pr_future else {}
 
+    rows = []
     for s in found:
         for c in s.clones:
             is_dirty, ahead = git_results[c]
             branch = c.branch + ("*" if is_dirty else "") + (f"↑{ahead}" if ahead else "")
             pr = pr_map.get(c.branch, "no-pr") if have_gh else "?"
-            print(f"{s.agent}\t{c.label}\t{s.slug}\t{pr}\t{branch}")
+            rows.append((s.agent, c.label, s.slug, pr, branch))
+
+    console.render_table(
+        ["agent", "label", "slug", "pr", "branch"],
+        rows,
+        styles={"pr": _pr_style, "branch": _branch_style},
+        plain=plain,
+    )
+
+    # Explain any "?" so a whole column of them doesn't read as a bug. Goes to
+    # stderr (after the table) — never pollutes the machine-mode rows on stdout.
+    if not have_gh:
+        console.warn('gh not on PATH — pr states shown as "?" (brew install gh)')
+    elif pr_errors:
+        console.warn(f'gh pr list failed for {len(pr_errors)} repo(s) — pr shown as "?"')
+        for url, reason in pr_errors.items():
+            console.detail(f"{_repo_slug(url)}: {reason}")
 
 
 @session_group.command("rm")
@@ -606,15 +654,15 @@ def session_rm(slug, dry_run, yes):
     target = f"{session.agent}/{session.slug}  ({session.path})"
 
     if dry_run:
-        print(f"would remove {target}")
+        console.info(f"would remove {target}")
         return
 
-    if not yes and not click.confirm(f"Remove {target}?"):
-        print("karakum: aborted", file=sys.stderr)
+    if not yes and not console.confirm(f"Remove {target}?"):
+        console.warn("aborted")
         return
 
     cleanup.remove(session)
-    print(f"removed {session.agent}/{session.slug}")
+    console.done(f"removed {session.agent}/{session.slug}")
 
 
 @session_group.command("clean")
@@ -634,7 +682,7 @@ def session_clean(slug, dry_run):
     custom_by_label = _project_clean_map()
 
     if not builtins and not any(c.label in custom_by_label for c in session.clones):
-        print("karakum: no clean commands configured", file=sys.stderr)
+        console.warn("no clean commands configured")
         return
 
     script = _clean_script(session.clones, builtins, custom_by_label)
@@ -656,7 +704,7 @@ def session_clean(slug, dry_run):
         raise click.ClickException(f"image {AGENT_IMAGE} not found — run `karakum build` first")
 
     subprocess.run(docker_cmd)
-    print(f"cleaned {session.agent}/{session.slug}")
+    console.done(f"cleaned {session.agent}/{session.slug}")
 
 
 @session_group.command("down")
@@ -671,17 +719,17 @@ def session_down(slug, yes):
     session = _resolve_session(slug)
     names = cleanup.running_containers(session.agent, session.slug)
     if not names:
-        print(f"karakum: no running containers for {session.agent}/{session.slug}", file=sys.stderr)
+        console.warn(f"no running containers for {session.agent}/{session.slug}")
         return
 
     listed = "\n".join(f"  {n}" for n in names)
-    print(f"running containers for {session.agent}/{session.slug}:\n{listed}")
-    if not yes and not click.confirm(f"Stop {len(names)} container(s)?"):
-        print("karakum: aborted", file=sys.stderr)
+    console.info(f"running containers for {session.agent}/{session.slug}:\n{listed}")
+    if not yes and not console.confirm(f"Stop {len(names)} container(s)?"):
+        console.warn("aborted")
         return
 
     cleanup.stop_containers(names)
-    print(f"stopped {len(names)} container(s)")
+    console.done(f"stopped {len(names)} container(s)")
 
 
 # backward-compat alias: `karakum sessions` still works

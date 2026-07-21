@@ -190,7 +190,8 @@ def test_session_down_yes_stops_containers(monkeypatch):
     result = CliRunner().invoke(cli.main, ["session", "down", "demo", "--yes"])
     assert result.exit_code == 0, _text(result)
     assert stopped == [["agent-alice-demo-aaa", "agent-alice-demo-bbb"]]
-    assert "stopped 2 container(s)" in result.output
+    # Success confirmations now go to stderr (console.done) — check combined text.
+    assert "stopped 2 container(s)" in _text(result)
 
 
 def test_session_down_abort_does_not_stop(monkeypatch):

@@ -1,8 +1,9 @@
 import os
-import sys
 from pathlib import Path
 
 import yaml
+
+from karakum import console
 
 
 def karakum_root() -> Path:
@@ -45,7 +46,7 @@ def toolchains_path() -> Path:
 
 def require(path: Path) -> None:
     if not path.exists():
-        print(f"karakum: no manifest at {path}", file=sys.stderr)
+        console.error(f"no manifest at {path}")
         raise SystemExit(2)
 
 
