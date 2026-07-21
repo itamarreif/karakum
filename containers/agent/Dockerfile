@@ -41,8 +41,21 @@ COPY --from=karakum-toolchain-proto:latest /usr/local/bin/protoc      /usr/local
 COPY --from=karakum-toolchain-proto:latest /usr/local/bin/buf         /usr/local/bin/buf
 COPY --from=karakum-toolchain-proto:latest /usr/local/include/google /usr/local/include/google
 
-# --- agent harness ---
-RUN npm install -g @anthropic-ai/claude-code
+# --- agent harnesses ---
+# Three interchangeable agent CLIs live on PATH; the user picks one after
+# `just shell`. claude authenticates from CLAUDE_CODE_OAUTH_TOKEN (or
+# ANTHROPIC_API_KEY); opencode + codex read ANTHROPIC_API_KEY / OPENAI_API_KEY
+# from the environment (injected via the secrets pipeline).
+RUN npm install -g @anthropic-ai/claude-code opencode-ai @openai/codex
+
+# opencode/codex follow the XDG base-dir spec and create ~/.config, ~/.local/share,
+# and ~/.local/state at startup. compose bind-mounts *nested* paths under these
+# (~/.config/opencode, ~/.local/share/opencode); Docker would otherwise auto-create
+# the parents (~/.local, ~/.local/share) root-owned, and the dropped-privilege agent
+# user couldn't then create a sibling like ~/.local/state → EACCES. Pre-create the
+# parents agent-owned so the mounts land inside writable dirs.
+RUN mkdir -p /home/agent/.config /home/agent/.local/share /home/agent/.local/state \
+ && chown -R agent:agent /home/agent/.local /home/agent/.config
 
 # Stay root; the base image's entrypoint renames the `agent` account to the
 # launching agent and drops to it. Re-asserting `USER agent` here would bypass

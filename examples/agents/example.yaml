@@ -3,7 +3,8 @@
 # edit, where <config-dir> is $KARAKUM_CONFIG_DIR (default ~/.config/karakum).
 #
 # An agent is decoupled from:
-#   - the toolchain (the container image the recipe runs)
+#   - the CLI it runs with (the one image carries claude, codex, and opencode;
+#     you pick one after `just shell`)
 #   - the project it works on (passed at invocation: `just shell <agent> <project> <slug>`)
 #
 # Memory = the agent's persistent self (skills, scratchpad, master prompt).
@@ -19,10 +20,9 @@
 #   memory.init       - OPTIONAL shell command run inside the container after the
 #                       mounts land, from the memory clone (`$KARAKUM_MEMORY`, i.e.
 #                       ~/<name>). karakum runs it verbatim and stays framework-
-#                       agnostic — use it to wire the memory framework into the
-#                       toolchain. `$KARAKUM_TOOLCHAIN` is available for
-#                       toolchain-specific destinations. Expected to be idempotent;
-#                       a failure is non-fatal.
+#                       agnostic — use it to wire the memory framework's master
+#                       prompt into each agent CLI's startup instructions.
+#                       Expected to be idempotent; a failure is non-fatal.
 #
 # Secrets are host-wide, not per-agent — see ../secrets.yaml.
 
@@ -30,5 +30,11 @@ name: example
 memory:
   path: ~/code/you/your-memory-repo
   repository: github.com/you/your-memory-repo
-  # Example: link a palimpsest vault's master prompt into Claude Code's startup memory.
-  # init: ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.claude/CLAUDE.md"
+  # Link the vault's master prompt into every agent CLI's startup instructions:
+  #   claude   → ~/.claude/CLAUDE.md
+  #   opencode → ~/.config/opencode/AGENTS.md
+  #   codex    → ~/.codex/AGENTS.md
+  # init: |
+  #   ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.claude/CLAUDE.md"
+  #   ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.config/opencode/AGENTS.md"
+  #   ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.codex/AGENTS.md"

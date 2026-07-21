@@ -94,7 +94,15 @@ def clone_status(clone: Clone) -> tuple[bool, int]:
 def pr_states(clones: list[Clone]) -> dict[str, str]:
     """Fetch PR states for all clones in one gh call per unique remote repo.
 
-    Returns a dict mapping clone.branch → state string (e.g. "#5", "merged", "no-pr").
+    Returns a dict mapping clone.branch → state string:
+      - "#5"      an open PR (its number)
+      - "merged" / "closed"   a resolved PR
+      - "no-pr"   the repo was queried successfully and has no PR for that branch
+      - "?"       the state is UNKNOWN — the `gh` call failed (not authenticated,
+                  offline, …) or the clone has no resolvable `origin`. This is kept
+                  distinct from "no-pr" so a gh/auth failure never masquerades as a
+                  confirmed absence of PR (every row reading "no-pr" is the tell).
+
     Groups clones by origin URL so there's one API call per repo, not per clone.
     """
     # Group by origin remote URL
@@ -107,14 +115,15 @@ def pr_states(clones: list[Clone]) -> dict[str, str]:
         url = r.stdout.strip() if r.returncode == 0 else ""
         by_origin.setdefault(url, []).append(clone)
 
-    def _fetch(url: str, repo_clones: list[Clone]) -> dict[str, str]:
+    def _fetch(repo_clones: list[Clone]) -> "dict[str, str] | None":
+        """Branch→state for one repo, or None if the `gh` call failed."""
         result = subprocess.run(
             ["gh", "pr", "list", "--state", "all",
              "--json", "number,state,headRefName", "--limit", "200"],
             capture_output=True, text=True, cwd=str(repo_clones[0].path),
         )
         if result.returncode != 0:
-            return {}
+            return None
         out: dict[str, str] = {}
         for pr in json.loads(result.stdout or "[]"):
             branch = pr["headRefName"]
@@ -122,13 +131,25 @@ def pr_states(clones: list[Clone]) -> dict[str, str]:
         return out
 
     branch_to_state: dict[str, str] = {}
+    failed_origins: set[str] = set()  # repos whose gh lookup errored → state unknown
     repos = [(url, rc) for url, rc in by_origin.items() if url]
     with ThreadPoolExecutor(max_workers=8) as pool:
-        futures = {pool.submit(_fetch, url, rc): url for url, rc in repos}
+        futures = {pool.submit(_fetch, rc): url for url, rc in repos}
         for fut in as_completed(futures):
-            branch_to_state.update(fut.result())
+            mp = fut.result()
+            if mp is None:
+                failed_origins.add(futures[fut])
+            else:
+                branch_to_state.update(mp)
 
-    return {clone.branch: branch_to_state.get(clone.branch, "no-pr") for clone in clones}
+    # A clone with no resolvable origin ("") or in a repo we couldn't query is
+    # UNKNOWN ("?"), not confirmed PR-less ("no-pr").
+    result: dict[str, str] = {}
+    for url, repo_clones in by_origin.items():
+        unknown = url == "" or url in failed_origins
+        for clone in repo_clones:
+            result[clone.branch] = "?" if unknown else branch_to_state.get(clone.branch, "no-pr")
+    return result
 
 
 def remove(session: Session) -> None:

@@ -9,7 +9,7 @@
 # Run via `just smoke` (needs `just build` first so the agent image exists).
 set -euo pipefail
 
-IMAGE="karakum-agent-claude:latest"
+IMAGE="karakum-agent:latest"
 AGENT="smoke"
 SLUG="smoketest"
 CONTAINER="agent-${AGENT}-${SLUG}-test"
@@ -20,6 +20,13 @@ command -v docker >/dev/null 2>&1 || fail "docker not on PATH"
 docker image inspect "$IMAGE" >/dev/null 2>&1 \
   || fail "image $IMAGE missing — run \`just build\` first"
 
+echo "== agent CLIs on PATH =="
+for cli in claude codex opencode; do
+  docker run --rm "$IMAGE" bash -lc "command -v $cli" >/dev/null 2>&1 \
+    || fail "$cli not on PATH in $IMAGE"
+done
+echo "  OK: claude, codex, opencode all present"
+
 WORK="$(mktemp -d)"
 cleanup() {
   docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
@@ -27,11 +34,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Isolate from the real config/data: empty config dir => no project overrides
-# (everything takes the toolchains.yaml autodetect path), temp data dir => our
-# fake session is the only one `session clean`/`down` can resolve.
+# Isolate from the real config/data: a throwaway config dir with no projects/ =>
+# no project overrides, so `session clean` takes the toolchains.yaml autodetect
+# path; temp data dir => our fake session is the only one it can resolve. The
+# config dir still needs a toolchains.yaml (autodetect reads its detect/clean
+# pairs) — seed it from the repo's example.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export KARAKUM_DATA_DIR="$WORK/data"
 export KARAKUM_CONFIG_DIR="$WORK/config"
+mkdir -p "$KARAKUM_CONFIG_DIR"
+cp "$REPO_ROOT/examples/toolchains.yaml" "$KARAKUM_CONFIG_DIR/toolchains.yaml"
 SESS="$KARAKUM_DATA_DIR/sessions/$AGENT/$SLUG"
 
 # clone A: a minimal Rust crate with a fake target/ -> autodetect `cargo clean`.

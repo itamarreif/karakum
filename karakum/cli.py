@@ -22,9 +22,10 @@ from karakum import session as ksession
 CONTAINER_HOME = "/home/agent"
 
 # The bundled agent image (built by `karakum build` via `docker compose build`,
-# tagged from docker-compose.yaml's `image:`). `session clean` runs over a
-# session's clones inside this image so every toolchain's clean tool is present.
-CLAUDE_IMAGE = "karakum-agent-claude:latest"
+# tagged from docker-compose.yaml's `image:`). It carries three interchangeable
+# agent CLIs (claude / codex / opencode) plus every toolchain, so `session clean`
+# runs over a session's clones inside it with all clean tools present.
+AGENT_IMAGE = "karakum-agent:latest"
 
 
 def _git_identity_args(agent: str) -> list[str]:
@@ -140,29 +141,26 @@ def main():
     pass
 
 
-@main.command("launch", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
-@click.argument("toolchain")
+@main.command("launch")
 @click.argument("agent")
 @click.argument("project")
 @click.argument("slug")
-@click.argument("cmd_args", nargs=-1, type=click.UNPROCESSED)
-def launch(toolchain, agent, project, slug, cmd_args):
-    """Launch an agent session in the given toolchain container."""
-    if not cmd_args:
-        raise click.UsageError("cmd is required")
-    cmd, *extra_args = cmd_args
-    _do_launch(toolchain, agent, project, slug, cmd, extra_args)
+def launch(agent, project, slug):
+    """Drop into a session shell (in ~); run claude/codex/opencode from there."""
+    _do_launch(agent, project, slug)
 
 
-def _do_launch(toolchain, agent, project, slug, cmd, extra_args=()):
+def _do_launch(agent, project, slug):
     """Host-side prep + exec of a session container (shared by `launch`/`resume`).
 
     Ensures the memory clone (branch `<project>/<slug>`, or a bare `<slug>` with no
     project) and, if given, the project clone (branch `<agent>/<slug>`), wires up
-    secrets / git identity / per-agent `~/.claude` state, then execs
-    `docker compose run`. Existing clones are reused in place, so this doubles as
-    the `resume` path.
+    secrets / git identity / per-CLI state, then execs `docker compose run` into a
+    shell. There is one agent image carrying claude/codex/opencode; the user runs
+    whichever CLI they want once inside. Existing clones are reused in place, so
+    this doubles as the `resume` path.
     """
+    cmd = "bash"
     preflight.check_tools()
 
     no_session = slug in ("-", "")
@@ -223,17 +221,26 @@ def _do_launch(toolchain, agent, project, slug, cmd, extra_args=()):
     # ~/<agent>/scratchpad (not ~/scratchpad/scratchpad).
     env["MEMORY_MOUNT"] = f"{CONTAINER_HOME}/{agent}"
 
-    # Per-agent harness state (~/.claude): a host dir, bind-mounted by compose via
-    # ${CLAUDE_STATE_DIR}. Host-owned (created as the launching user == container
-    # `agent` uid), so it's writable — unlike a root-owned named volume — and
-    # persists across runs. We only create it and export the path.
-    state_dir = config.state_root() / agent
-    state_dir.mkdir(parents=True, exist_ok=True)
-    env["CLAUDE_STATE_DIR"] = str(state_dir)
+    # Per-CLI persistent state. Each is a host dir under <state_root>/ (host-owned,
+    # created as the launching user == container `agent` uid, so it's writable
+    # unlike a root-owned named volume) bind-mounted by compose into the CLI's
+    # expected location, so config/auth/history survive across --rm runs. claude
+    # keeps the bare <state_root>/<agent> path (its ~/.claude); the others hang off
+    # it with suffixes so nothing nests inside the claude mount.
+    state_root = config.state_root()
+    state_dir = state_root / agent
+    for d, var in (
+        (state_dir,                          "CLAUDE_STATE_DIR"),     # → ~/.claude
+        (state_root / f"{agent}-opencode",   "OPENCODE_CONFIG_DIR"),  # → ~/.config/opencode
+        (state_root / f"{agent}-opencode-data", "OPENCODE_DATA_DIR"), # → ~/.local/share/opencode
+        (state_root / f"{agent}-codex",      "CODEX_STATE_DIR"),      # → ~/.codex
+    ):
+        d.mkdir(parents=True, exist_ok=True)
+        env[var] = str(d)
 
     # Mark onboarding complete so claude skips the first-run wizard and launches
-    # straight in (auth comes from CLAUDE_CODE_OAUTH_TOKEN, not /login). Read-
-    # modify-write so claude's own edits to the file are preserved.
+    # straight in (auth comes from CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY,
+    # not /login). Read-modify-write so claude's own edits are preserved.
     claude_cfg = state_dir / ".claude.json"
     try:
         cfg_data = json.loads(claude_cfg.read_text()) if claude_cfg.exists() else {}
@@ -243,13 +250,25 @@ def _do_launch(toolchain, agent, project, slug, cmd, extra_args=()):
         cfg_data["hasCompletedOnboarding"] = True
         claude_cfg.write_text(json.dumps(cfg_data, indent=2))
 
+    # Seed opencode's global config once so it launches straight into a usable
+    # model instead of the first-run picker; opencode auto-detects the Anthropic /
+    # OpenAI providers from ANTHROPIC_API_KEY / OPENAI_API_KEY in the env. Only
+    # written if absent, so the user's own edits (model switches, etc.) persist.
+    opencode_cfg = state_root / f"{agent}-opencode" / "opencode.json"
+    if not opencode_cfg.exists():
+        opencode_cfg.write_text(json.dumps({
+            "$schema": "https://opencode.ai/config.json",
+            "model": "anthropic/claude-sonnet-4-5",
+            "autoupdate": False,
+        }, indent=2))
+
     # --- container name (unique per invocation to allow multiple terminals) ---
     slug_label = slug if not no_session else "main"
     container_name = f"agent-{agent}-{slug_label}-{uuid.uuid4().hex[:6]}"
 
     # The setup hook (if any) is passed verbatim; entrypoint.sh runs it via `sh -c`
-    # as the agent user after mounts land. Toolchain-agnostic agents get the
-    # toolchain via env so a hook can pick a toolchain-specific destination.
+    # as the agent user after mounts land. A single image carries every CLI, so the
+    # hook can wire the memory framework into all of them (see examples/agents).
     init_args = ["-e", f"KARAKUM_MEMORY_INIT={memory_init}"] if memory_init else []
 
     docker_cmd = [
@@ -257,7 +276,6 @@ def _do_launch(toolchain, agent, project, slug, cmd, extra_args=()):
         "--name", container_name,
         "-e", f"KARAKUM_SESSION={session_name}",
         "-e", f"KARAKUM_AGENT={agent}",
-        "-e", f"KARAKUM_TOOLCHAIN={toolchain}",
         "-e", f"KARAKUM_MEMORY={CONTAINER_HOME}/{agent}",
         *init_args,
         *project_args,
@@ -267,9 +285,8 @@ def _do_launch(toolchain, agent, project, slug, cmd, extra_args=()):
         *_terminal_args(),
         "-w", CONTAINER_HOME,
         *secret_docker_args,
-        f"agent-{toolchain}",
+        "agent",
         cmd,
-        *extra_args,
     ]
 
     os.chdir(manifest.karakum_root())
@@ -293,10 +310,9 @@ def _project_for_label(label: str) -> "str | None":
     return None
 
 
-@main.command("resume", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+@main.command("resume")
 @click.argument("spec")
-@click.argument("cmd_args", nargs=-1, type=click.UNPROCESSED)
-def resume(spec, cmd_args):
+def resume(spec):
     """Reopen an existing session: `karakum resume <slug>` (or `<agent>/<slug>`).
 
     Resolves the session on disk — erroring if a bare slug exists under multiple
@@ -324,8 +340,7 @@ def resume(spec, cmd_args):
                 f"reopen explicitly with 'just shell {session.agent} <project> {session.slug}'."
             )
 
-    cmd, *extra = cmd_args or ("bash",)
-    _do_launch("claude", session.agent, project, session.slug, cmd, extra)
+    _do_launch(session.agent, project, session.slug)
 
 
 @main.command("pngpaste")
@@ -627,7 +642,7 @@ def session_clean(slug, dry_run):
         "docker", "run", "--rm",
         "-v", f"{session.path}:/work",
         "-w", "/work",
-        CLAUDE_IMAGE,
+        AGENT_IMAGE,
         "bash", "-c", script,
     ]
 
@@ -636,9 +651,9 @@ def session_clean(slug, dry_run):
         return
 
     # The image is built by `karakum build`; `docker run` can't build it on demand.
-    if subprocess.run(["docker", "image", "inspect", CLAUDE_IMAGE],
+    if subprocess.run(["docker", "image", "inspect", AGENT_IMAGE],
                       capture_output=True, text=True).returncode != 0:
-        raise click.ClickException(f"image {CLAUDE_IMAGE} not found — run `karakum build` first")
+        raise click.ClickException(f"image {AGENT_IMAGE} not found — run `karakum build` first")
 
     subprocess.run(docker_cmd)
     print(f"cleaned {session.agent}/{session.slug}")
