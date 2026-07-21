@@ -90,7 +90,7 @@ def clone_status(clone: Clone) -> tuple[bool, int]:
     return dirty(clone), unpushed(clone)
 
 
-def pr_states(clones: list[Clone]) -> dict[str, str]:
+def pr_states(clones: list[Clone], errors: "dict[str, str] | None" = None) -> dict[str, str]:
     """Fetch PR states for all clones in one gh call per unique remote repo.
 
     Returns a dict mapping clone.branch → state string:
@@ -101,6 +101,10 @@ def pr_states(clones: list[Clone]) -> dict[str, str]:
                   offline, …) or the clone has no resolvable `origin`. This is kept
                   distinct from "no-pr" so a gh/auth failure never masquerades as a
                   confirmed absence of PR (every row reading "no-pr" is the tell).
+
+    If `errors` is a dict, it is populated `{origin_url: reason}` for every repo
+    whose `gh` lookup failed, so a caller can tell the user *why* a "?" appeared
+    instead of leaving it a silent mystery.
 
     Groups clones by origin URL so there's one API call per repo, not per clone.
     """
@@ -114,20 +118,22 @@ def pr_states(clones: list[Clone]) -> dict[str, str]:
         url = r.stdout.strip() if r.returncode == 0 else ""
         by_origin.setdefault(url, []).append(clone)
 
-    def _fetch(repo_clones: list[Clone]) -> "dict[str, str] | None":
-        """Branch→state for one repo, or None if the `gh` call failed."""
+    def _fetch(repo_clones: list[Clone]) -> "tuple[dict[str, str] | None, str]":
+        """(branch→state, "") for one repo, or (None, reason) if the `gh` call failed."""
         result = subprocess.run(
             ["gh", "pr", "list", "--state", "all",
              "--json", "number,state,headRefName", "--limit", "200"],
             capture_output=True, text=True, cwd=str(repo_clones[0].path),
         )
         if result.returncode != 0:
-            return None
+            stderr = result.stderr.strip()
+            reason = stderr.splitlines()[0] if stderr else f"gh exited {result.returncode}"
+            return None, reason
         out: dict[str, str] = {}
         for pr in json.loads(result.stdout or "[]"):
             branch = pr["headRefName"]
             out[branch] = f"#{pr['number']}" if pr["state"] == "OPEN" else pr["state"].lower()
-        return out
+        return out, ""
 
     branch_to_state: dict[str, str] = {}
     failed_origins: set[str] = set()  # repos whose gh lookup errored → state unknown
@@ -135,9 +141,11 @@ def pr_states(clones: list[Clone]) -> dict[str, str]:
     with ThreadPoolExecutor(max_workers=8) as pool:
         futures = {pool.submit(_fetch, rc): url for url, rc in repos}
         for fut in as_completed(futures):
-            mp = fut.result()
+            mp, reason = fut.result()
             if mp is None:
                 failed_origins.add(futures[fut])
+                if errors is not None:
+                    errors[futures[fut]] = reason
             else:
                 branch_to_state.update(mp)
 

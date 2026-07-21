@@ -578,6 +578,15 @@ def _branch_style(branch: str) -> "str | None":
     return "yellow" if ("*" in branch or "↑" in branch) else None
 
 
+def _repo_slug(url: str) -> str:
+    """`owner/repo` from a git remote URL, for compact error lines."""
+    s = url.rstrip("/")
+    if s.endswith(".git"):
+        s = s[:-4]
+    parts = [p for p in s.replace(":", "/").split("/") if p]
+    return "/".join(parts[-2:]) if len(parts) >= 2 else s
+
+
 @session_group.command("ls")
 @click.argument("agent", required=False)
 @click.option("--plain", is_flag=True, default=None, help="Force plain TSV output.")
@@ -597,11 +606,12 @@ def session_ls(agent, plain):
 
     all_clones = [c for s in found for c in s.clones]
     have_gh = bool(shutil.which("gh"))
+    pr_errors: dict[str, str] = {}  # origin url → why its gh lookup failed
 
     # Fetch git status for all clones in parallel, and gh PR states in one call per repo.
     with ThreadPoolExecutor(max_workers=8) as pool:
         git_futures = {pool.submit(cleanup.clone_status, c): c for c in all_clones}
-        pr_future = pool.submit(cleanup.pr_states, all_clones) if have_gh else None
+        pr_future = pool.submit(cleanup.pr_states, all_clones, pr_errors) if have_gh else None
 
         git_results: dict[cleanup.Clone, tuple[bool, int]] = {}
         for fut in git_futures:
@@ -623,6 +633,15 @@ def session_ls(agent, plain):
         styles={"pr": _pr_style, "branch": _branch_style},
         plain=plain,
     )
+
+    # Explain any "?" so a whole column of them doesn't read as a bug. Goes to
+    # stderr (after the table) — never pollutes the machine-mode rows on stdout.
+    if not have_gh:
+        console.warn('gh not on PATH — pr states shown as "?" (brew install gh)')
+    elif pr_errors:
+        console.warn(f'gh pr list failed for {len(pr_errors)} repo(s) — pr shown as "?"')
+        for url, reason in pr_errors.items():
+            console.detail(f"{_repo_slug(url)}: {reason}")
 
 
 @session_group.command("rm")
