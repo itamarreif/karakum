@@ -639,7 +639,7 @@ def session_ls(agent, plain):
     if not have_gh:
         console.warn('gh not on PATH — pr states shown as "?" (brew install gh)')
     elif pr_errors:
-        console.warn(f'gh pr list failed for {len(pr_errors)} repo(s) — pr shown as "?"')
+        console.warn(f'PR lookup (gh api) failed for {len(pr_errors)} repo(s) — pr shown as "?"')
         for url, reason in pr_errors.items():
             console.detail(f"{_repo_slug(url)}: {reason}")
 
