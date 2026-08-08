@@ -71,7 +71,9 @@ karakum/
                   <sessions_root>/<agent>/<slug>/<label> (real-clone guard);
                   Clone is a frozen dataclass; clone_status() returns dirty +
                   unpushed via parallel ThreadPoolExecutor; pr_states() batches
-                  gh calls per repo; remove() rmtree's the session dir + reaps
+                  one `gh api .../pulls` (REST) call per repo, taking a resolved
+                  GH_TOKEN env (cli._gh_env) so it works past a gh shell wrapper;
+                  remove() rmtree's the session dir + reaps
                   exited agent-<agent>-<slug>-* containers.
                   running_containers()/stop_containers() find + `docker stop`
                   the *running* agent-<agent>-<slug>-* containers (for
@@ -137,7 +139,7 @@ session_ls(agent?)                        session_rm(slug, --dry-run, --yes)
    └─ cleanup.iter_sessions(agent)           ├─ cleanup.iter_sessions() filter by slug
    └─ clone_status() in parallel             ├─ error if slug matches multiple agents
         (dirty, unpushed via ThreadPool)     ├─ print plan; stop if --dry-run
-   └─ pr_states() batched per repo (gh)      └─ confirm (unless --yes) → cleanup.remove(s)
+   └─ pr_states() per repo (gh api + token)  └─ confirm (unless --yes) → cleanup.remove(s)
    └─ print(agent label slug pr-state              (rmtree session dir + reap exited containers)
             branch)
 ```

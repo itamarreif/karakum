@@ -83,7 +83,7 @@ For how the CLI is wired together — modules, command dispatch, and the `launch
 - `uv` (`brew install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`).
 - `just` (`brew install just`).
 - `op` (`brew install 1password-cli`) — only if any agent manifest uses `op://` secrets.
-- `gh` (`brew install gh`) — only for `just sessions` pr-state column (it queries GitHub for PR status).
+- `gh` (`brew install gh`) — only for `just sessions` pr-state column (it queries GitHub for PR status via `gh api`, authenticating with the `GH_TOKEN` resolved from `secrets.yaml`).
 
 ## First-run setup
 
@@ -166,7 +166,7 @@ alice   scratchpad  fix-login   no-pr     webapp/fix-login*
 alice   webapp      fix-login   #12       alice/fix-login↑2
 ```
 
-The branch column folds in dirty (`*`) and unpushed (`↑N`) state; note the two clones of a session carry differently namespaced branches (memory on `<project>/<slug>`, project on `<agent>/<slug>`). The pr-state column queries GitHub via `gh` (`#N` for an open PR, else the state, `no-pr` if none); without `gh` it shows `?`.
+The branch column folds in dirty (`*`) and unpushed (`↑N`) state; note the two clones of a session carry differently namespaced branches (memory on `<project>/<slug>`, project on `<agent>/<slug>`). The pr-state column queries GitHub with `gh api repos/{owner}/{repo}/pulls` (`#N` for an open PR, else `merged`/`closed`, `no-pr` if none). It authenticates with the `GH_TOKEN` resolved from `secrets.yaml` — the same source `just shell` uses — so it works on the host even when your interactive `gh` is a shell-function wrapper; an already-exported `GH_TOKEN` is reused as-is. Without `gh` on PATH, or when the token is missing/rejected, the cell shows `?` and a stderr line names the repo + reason.
 
 `just session-rm <slug>` (alias: `karakum session rm <slug>`) deletes the entire session directory and reaps any exited `agent-<agent>-<slug>-*` containers. If the slug exists under multiple agents it lists them and errors; qualify it as `<agent>/<slug>` to pick one. (Same for `session-clean` / `session-down` / `resume` — they share one resolver.)
 
