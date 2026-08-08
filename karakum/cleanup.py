@@ -90,8 +90,16 @@ def clone_status(clone: Clone) -> tuple[bool, int]:
     return dirty(clone), unpushed(clone)
 
 
-def pr_states(clones: list[Clone], errors: "dict[str, str] | None" = None) -> dict[str, str]:
+def pr_states(
+    clones: list[Clone],
+    errors: "dict[str, str] | None" = None,
+    env: "dict[str, str] | None" = None,
+) -> dict[str, str]:
     """Fetch PR states for all clones in one gh call per unique remote repo.
+
+    `env`, if given, is the environment for the `gh` subprocess — used to inject a
+    resolved GH_TOKEN so the call doesn't depend on the caller's shell wrapper
+    (see `cli._gh_env`). `None` inherits the ambient environment.
 
     Returns a dict mapping clone.branch → state string:
       - "#5"      an open PR (its number)
@@ -132,7 +140,7 @@ def pr_states(clones: list[Clone], errors: "dict[str, str] | None" = None) -> di
             ["gh", "api", "--paginate",
              "repos/{owner}/{repo}/pulls?state=all&per_page=100",
              "--jq", ".[] | {number, ref: .head.ref, merged: (.merged_at != null), state}"],
-            capture_output=True, text=True, cwd=str(repo_clones[0].path),
+            capture_output=True, text=True, cwd=str(repo_clones[0].path), env=env,
         )
         if result.returncode != 0:
             stderr = result.stderr.strip()

@@ -85,3 +85,22 @@ def test_pr_states_one_failing_repo_does_not_taint_another(monkeypatch):
     res = cleanup.pr_states([ok, bad])
     assert res["takwin/opencode"] == "#18"   # healthy repo unaffected
     assert res["karakum/opencode"] == "?"    # failing repo → unknown
+
+
+def test_pr_states_forwards_env_to_gh(monkeypatch):
+    """The injected GH_TOKEN env (see cli._gh_env) reaches the `gh` subprocess."""
+    c = _clone("karakum", "/s/a/x/karakum", "takwin/opencode")
+    origins = {str(c.path): "git@github.com:o/karakum.git"}
+    seen_env = {}
+
+    def run(cmd, **kw):
+        if cmd[:2] == ["git", "-C"]:
+            return SimpleNamespace(returncode=0, stdout=origins[cmd[2]] + "\n", stderr="")
+        if cmd[0] == "gh":
+            seen_env["env"] = kw.get("env")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        raise AssertionError(cmd)
+
+    monkeypatch.setattr(cleanup.subprocess, "run", run)
+    cleanup.pr_states([c], env={"GH_TOKEN": "tok-123"})
+    assert seen_env["env"] == {"GH_TOKEN": "tok-123"}  # threaded through to gh, not the git call

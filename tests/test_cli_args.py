@@ -96,3 +96,35 @@ def test_terminal_falls_back_when_term_unset(monkeypatch):
     env = _env(cli._terminal_args())
     assert env["TERM"] == "xterm-256color"
     assert env["COLORTERM"] == "truecolor"
+
+
+# --- _gh_env ---------------------------------------------------------------
+
+def test_gh_env_inherits_ambient_token(monkeypatch):
+    """Ambient GH_TOKEN present → inherit it (return None, no secret resolution)."""
+    monkeypatch.setenv("GH_TOKEN", "ambient-tok")
+    monkeypatch.setattr(cli.ksecrets, "load", lambda: (_ for _ in ()).throw(AssertionError("should not resolve")))
+    assert cli._gh_env() is None
+
+
+def test_gh_env_resolves_token_from_secrets(monkeypatch):
+    """No ambient token → resolve from secrets.yaml and inject GH_TOKEN into a full env copy."""
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.setenv("PATH", "/usr/bin")  # ensure the ambient env is carried through
+    monkeypatch.setattr(cli.ksecrets, "load", lambda: ({"GH_TOKEN": "resolved-tok"}, []))
+    env = cli._gh_env()
+    assert env["GH_TOKEN"] == "resolved-tok"
+    assert env["PATH"] == "/usr/bin"  # not a bare {GH_TOKEN:…} dict — gh still needs PATH etc.
+
+
+def test_gh_env_degrades_when_resolution_fails(monkeypatch):
+    """Secret resolution SystemExit (op not signed in, bad ref) → None, lookup degrades to "?"."""
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.setattr(cli.ksecrets, "load", lambda: (_ for _ in ()).throw(SystemExit(2)))
+    assert cli._gh_env() is None
+
+
+def test_gh_env_none_when_secrets_have_no_token(monkeypatch):
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.setattr(cli.ksecrets, "load", lambda: ({}, []))
+    assert cli._gh_env() is None
