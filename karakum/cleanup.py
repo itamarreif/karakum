@@ -90,8 +90,16 @@ def clone_status(clone: Clone) -> tuple[bool, int]:
     return dirty(clone), unpushed(clone)
 
 
-def pr_states(clones: list[Clone], errors: "dict[str, str] | None" = None) -> dict[str, str]:
+def pr_states(
+    clones: list[Clone],
+    errors: "dict[str, str] | None" = None,
+    env: "dict[str, str] | None" = None,
+) -> dict[str, str]:
     """Fetch PR states for all clones in one gh call per unique remote repo.
+
+    `env`, if given, is the environment for the `gh` subprocess — used to inject a
+    resolved GH_TOKEN so the call doesn't depend on the caller's shell wrapper
+    (see `cli._gh_env`). `None` inherits the ambient environment.
 
     Returns a dict mapping clone.branch → state string:
       - "#5"      an open PR (its number)
@@ -119,20 +127,36 @@ def pr_states(clones: list[Clone], errors: "dict[str, str] | None" = None) -> di
         by_origin.setdefault(url, []).append(clone)
 
     def _fetch(repo_clones: list[Clone]) -> "tuple[dict[str, str] | None, str]":
-        """(branch→state, "") for one repo, or (None, reason) if the `gh` call failed."""
+        """(branch→state, "") for one repo, or (None, reason) if the `gh` call failed.
+
+        Uses the REST endpoint (`GET /repos/{owner}/{repo}/pulls`) via `gh api`
+        rather than `gh pr list`: `gh pr list` goes through GraphQL, which fails
+        with the host's fine-grained PAT, whereas REST is fully supported (needs
+        the token's `Pull requests: Read` + repo access). `{owner}`/`{repo}` are
+        resolved by `gh` from the clone's `origin`, same as before (cwd-driven).
+        `--paginate` + `--jq` streams one compact JSON object per PR (JSON Lines).
+        """
         result = subprocess.run(
-            ["gh", "pr", "list", "--state", "all",
-             "--json", "number,state,headRefName", "--limit", "200"],
-            capture_output=True, text=True, cwd=str(repo_clones[0].path),
+            ["gh", "api", "--paginate",
+             "repos/{owner}/{repo}/pulls?state=all&per_page=100",
+             "--jq", ".[] | {number, ref: .head.ref, merged: (.merged_at != null), state}"],
+            capture_output=True, text=True, cwd=str(repo_clones[0].path), env=env,
         )
         if result.returncode != 0:
             stderr = result.stderr.strip()
             reason = stderr.splitlines()[0] if stderr else f"gh exited {result.returncode}"
             return None, reason
         out: dict[str, str] = {}
-        for pr in json.loads(result.stdout or "[]"):
-            branch = pr["headRefName"]
-            out[branch] = f"#{pr['number']}" if pr["state"] == "OPEN" else pr["state"].lower()
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            pr = json.loads(line)
+            branch = pr["ref"]
+            if pr["state"] == "open":
+                out[branch] = f"#{pr['number']}"
+            else:
+                out[branch] = "merged" if pr["merged"] else "closed"
         return out, ""
 
     branch_to_state: dict[str, str] = {}

@@ -587,6 +587,35 @@ def _repo_slug(url: str) -> str:
     return "/".join(parts[-2:]) if len(parts) >= 2 else s
 
 
+def _gh_env() -> "dict | None":
+    """Environment for host-side `gh` calls, with GH_TOKEN resolved from secrets.
+
+    `session ls` runs on the host, where a user's `gh` is often a 1Password shell
+    *function* that injects GH_TOKEN at call time. Our `subprocess.run(["gh", …])`
+    execs the real gh *binary*, which never sees that token and falls back to a
+    stale keyring token → `Bad credentials (HTTP 401)`, so every `pr` cell is "?".
+    Resolve GH_TOKEN the same way `launch` does (secrets.yaml) and pass it
+    explicitly.
+
+    Best-effort: if the ambient env already carries GH_TOKEN we inherit it (return
+    None — no `op` prompt); if secret resolution fails or yields nothing we also
+    return None, so the lookup inherits the ambient env and a bad token still
+    degrades to "?" rather than aborting the whole listing.
+    """
+    if os.environ.get("GH_TOKEN"):
+        return None  # already set (exported / prefixed) — inherit, don't re-resolve
+    try:
+        env_dict, _ = ksecrets.load()
+    except SystemExit:
+        return None  # op not signed in, a ref unresolvable, … → leave as "?"
+    token = env_dict.get("GH_TOKEN")
+    if not token:
+        return None
+    env = os.environ.copy()
+    env["GH_TOKEN"] = token
+    return env
+
+
 @session_group.command("ls")
 @click.argument("agent", required=False)
 @click.option("--plain", is_flag=True, default=None, help="Force plain TSV output.")
@@ -607,11 +636,12 @@ def session_ls(agent, plain):
     all_clones = [c for s in found for c in s.clones]
     have_gh = bool(shutil.which("gh"))
     pr_errors: dict[str, str] = {}  # origin url → why its gh lookup failed
+    gh_env = _gh_env() if have_gh else None  # inject a resolved GH_TOKEN (see _gh_env)
 
     # Fetch git status for all clones in parallel, and gh PR states in one call per repo.
     with ThreadPoolExecutor(max_workers=8) as pool:
         git_futures = {pool.submit(cleanup.clone_status, c): c for c in all_clones}
-        pr_future = pool.submit(cleanup.pr_states, all_clones, pr_errors) if have_gh else None
+        pr_future = pool.submit(cleanup.pr_states, all_clones, pr_errors, gh_env) if have_gh else None
 
         git_results: dict[cleanup.Clone, tuple[bool, int]] = {}
         for fut in git_futures:
@@ -639,7 +669,7 @@ def session_ls(agent, plain):
     if not have_gh:
         console.warn('gh not on PATH — pr states shown as "?" (brew install gh)')
     elif pr_errors:
-        console.warn(f'gh pr list failed for {len(pr_errors)} repo(s) — pr shown as "?"')
+        console.warn(f'PR lookup (gh api) failed for {len(pr_errors)} repo(s) — pr shown as "?"')
         for url, reason in pr_errors.items():
             console.detail(f"{_repo_slug(url)}: {reason}")
 
