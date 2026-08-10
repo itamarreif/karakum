@@ -12,9 +12,10 @@ how to authenticate it for the two common cases.
 - **State** — pi consolidates everything (config, sessions, and, if you ever run
   interactive `/login`, `auth.json`) under `~/.pi/agent` — it does **not** follow the
   XDG split like opencode. So it's a single per-agent host mount:
-  `<state_root>/<agent>-pi` → `~/.pi`. The launcher seeds `~/.pi/agent/settings.json`
-  once (default provider/model) so pi skips the first-run picker; your own `/model`
-  switches persist because the seed is only written when absent.
+  `<state_root>/<agent>-pi` → `~/.pi`. karakum enforces **no** settings on pi (unlike
+  opencode, which is seeded a default model): you pick a model with `/model`, and pi
+  writes that choice — plus sessions, trust, etc. — to `~/.pi/agent/settings.json`,
+  which persists in the mount across sessions for that agent.
 - **Auth** — entirely **env-injected via the secrets pipeline**. Nothing interactive,
   nothing written to disk. pi reads (see its `packages/ai` provider code):
 
@@ -27,8 +28,8 @@ how to authenticate it for the two common cases.
   Because the launcher forwards secrets as `-e VAR` (name only on argv, value from the
   launcher's own env) and pi never persists an env-provided token, **no credential
   lands on the host disk** — the same no-secrets-at-rest model as claude's
-  `CLAUDE_CODE_OAUTH_TOKEN`. The `~/.pi` mount holds only sessions + the seeded
-  `settings.json`.
+  `CLAUDE_CODE_OAUTH_TOKEN`. The `~/.pi` mount holds only your own state (settings,
+  sessions, trust) — nothing karakum writes.
 
 Auth is selected per host in `<config-dir>/secrets.yaml` (see
 [configuration](configuration.md) and [`examples/secrets.yaml`](../examples/secrets.yaml)).

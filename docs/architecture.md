@@ -245,8 +245,8 @@ cli.launch(agent, project, slug)   →   _do_launch(agent, project, slug)
 │   ├─ pi       : <state_root>/<agent>-pi           → ~/.pi                   ; PI_STATE_DIR
 │   ├─ mkdir -p each ; env[VAR]=dir
 │   ├─ seed <claude>/.claude.json → hasCompletedOnboarding=true   # read-modify-write; skips claude's first-run wizard
-│   ├─ seed <opencode>/opencode.json (if absent) → default model + autoupdate:false   # skips opencode's model picker
-│   └─ seed <pi>/agent/settings.json (if absent) → default provider/model   # skips pi's model picker (auth: env keys / ANTHROPIC_OAUTH_TOKEN — no auth.json)
+│   └─ seed <opencode>/opencode.json (if absent) → default model + autoupdate:false   # skips opencode's model picker
+│      (pi is NOT seeded — user picks a model, pi persists it in the mount; auth: env keys / ANTHROPIC_OAUTH_TOKEN — no auth.json)
 │
 ├─6 BUILD docker argv
 │   container_name = f"agent-{agent}-{slug_label}-{uuid4[:6]}"

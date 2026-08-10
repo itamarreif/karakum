@@ -263,24 +263,13 @@ def _do_launch(agent, project, slug):
             "autoupdate": False,
         }, indent=2))
 
-    # Seed pi's global settings once so it launches into a usable model instead of
-    # the picker. Auth is entirely env-injected (secrets pipeline), no login and no
-    # secret at rest: ANTHROPIC_API_KEY / OPENAI_API_KEY for API billing, or
-    # ANTHROPIC_OAUTH_TOKEN (an sk-ant-oat token) for a Claude subscription — pi
-    # resolves these straight from the env, so no ~/.pi/agent/auth.json is written.
-    # pi keeps everything under ~/.pi/agent — mounted here as <state>/agent — so the
-    # settings file is one level deeper than opencode's. Only written if absent, so
-    # /model switches (and any state pi does persist) survive across runs.
-    pi_agent_dir = state_root / f"{agent}-pi" / "agent"
-    pi_cfg = pi_agent_dir / "settings.json"
-    if not pi_cfg.exists():
-        pi_agent_dir.mkdir(parents=True, exist_ok=True)
-        pi_cfg.write_text(json.dumps({
-            "$schema": "https://raw.githubusercontent.com/badlogic/pi-mono/main/packages/coding-agent/src/core/settings-schema.json",
-            "defaultProvider": "anthropic",
-            "defaultModel": "claude-sonnet-4-20250514",
-            "enableInstallTelemetry": False,
-        }, indent=2))
+    # pi is intentionally NOT seeded. Unlike opencode, pi launches into a usable
+    # default without a config, and pinning a defaultModel just risks a stale id
+    # (its catalog drifts every release). So karakum enforces nothing: the user
+    # picks a model with /model, and pi persists that choice — plus sessions, trust,
+    # etc. — to ~/.pi/agent inside the PI_STATE_DIR mount, so it survives across runs.
+    # Auth is env-injected (ANTHROPIC_API_KEY / OPENAI_API_KEY, or ANTHROPIC_OAUTH_TOKEN
+    # for a Claude subscription); nothing is written to ~/.pi/agent/auth.json.
 
     # --- container name (unique per invocation to allow multiple terminals) ---
     slug_label = slug if not no_session else "main"
