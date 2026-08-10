@@ -69,6 +69,7 @@ karakum/
   docker-compose.yaml       The `agent` service (image + mount/env contract).
   docs/architecture.md      CLI structure + per-command call graphs.
   docs/configuration.md     The three-location config model.
+  docs/pi.md                pi (pi.dev) wiring + per-machine auth setup.
   pyproject.toml            Python package definition.
 ```
 
@@ -219,7 +220,7 @@ secrets:
 
 > `ANTHROPIC_API_KEY` is injected into every session, so `claude` may bill against it instead of the `CLAUDE_CODE_OAUTH_TOKEN` subscription. Keep only the one you want claude to use.
 
-Claude Code authenticates from `CLAUDE_CODE_OAUTH_TOKEN` (above) — interactive `/login` doesn't work reliably in the container. The launcher also seeds `hasCompletedOnboarding` in the per-agent `~/.claude` state dir so claude skips the first-run wizard and starts straight in; settings, trusted folders, and history then persist in that host dir across runs. `codex`, `opencode`, and `pi` authenticate from `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` in the same way — no interactive login — and opencode's and pi's seeded configs skip their model pickers. `pi` also runs on a Claude **subscription** with no secret at rest: set `ANTHROPIC_OAUTH_TOKEN` (an `sk-ant-oat` token — the same kind `claude setup-token` mints, so it can point at the same 1Password item as `CLAUDE_CODE_OAUTH_TOKEN`) *instead of* `ANTHROPIC_API_KEY`. pi resolves it from the env and sends the `anthropic-beta: oauth-2025-04-20` subscription header — nothing is written to `~/.pi/agent/auth.json`.
+Claude Code authenticates from `CLAUDE_CODE_OAUTH_TOKEN` (above) — interactive `/login` doesn't work reliably in the container. The launcher also seeds `hasCompletedOnboarding` in the per-agent `~/.claude` state dir so claude skips the first-run wizard and starts straight in; settings, trusted folders, and history then persist in that host dir across runs. `codex`, `opencode`, and `pi` authenticate from `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` in the same way — no interactive login — and opencode's and pi's seeded configs skip their model pickers. `pi` also runs on a Claude **subscription** with no secret at rest: set `ANTHROPIC_OAUTH_TOKEN` (an `sk-ant-oat` token — the same kind `claude setup-token` mints, so it can point at the same 1Password item as `CLAUDE_CODE_OAUTH_TOKEN`) *instead of* `ANTHROPIC_API_KEY`. pi resolves it from the env and sends the `anthropic-beta: oauth-2025-04-20` subscription header — nothing is written to `~/.pi/agent/auth.json`. Full pi setup, including per-machine `secrets.yaml` examples: [`docs/pi.md`](docs/pi.md).
 
 **Registered providers** (`karakum/secrets.py`):
 - `op://<vault>/<item>/<field>` — 1Password via `op read`.
