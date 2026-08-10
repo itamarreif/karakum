@@ -8,8 +8,8 @@ This file uses [AGENTS.md](https://agents.md/) — the harness-agnostic conventi
 
 karakum decouples three things that older agent systems conflate:
 
-1. **CLI** = which agent you drive. The single agent image carries `claude`, `codex`, and `opencode` on `PATH`; you pick one **inside** the session shell — it is not a launch argument. (The image's build toolchains — node/python/rust/proto — are pinned in `toolchains.yaml`.)
-2. **Agent** = identity. Has a name + memory (the persistent self: skills, scratchpad, master prompt). Declared in `agents/<name>.yaml`. **No** CLI field, **no** project field — agents are portable across both. Secrets are host-wide, not per-agent (declared once in `secrets.yaml`). Each CLI's state persists in a per-agent host dir under `<state_root>` (default `~/.karakum/state`): claude `~/.claude`, opencode `~/.config/opencode` + `~/.local/share/opencode`, codex `~/.codex`.
+1. **CLI** = which agent you drive. The single agent image carries `claude`, `codex`, `opencode`, and `pi` on `PATH`; you pick one **inside** the session shell — it is not a launch argument. (The image's build toolchains — node/python/rust/proto — are pinned in `toolchains.yaml`.)
+2. **Agent** = identity. Has a name + memory (the persistent self: skills, scratchpad, master prompt). Declared in `agents/<name>.yaml`. **No** CLI field, **no** project field — agents are portable across both. Secrets are host-wide, not per-agent (declared once in `secrets.yaml`). Each CLI's state persists in a per-agent host dir under `<state_root>` (default `~/.karakum/state`): claude `~/.claude`, opencode `~/.config/opencode` + `~/.local/share/opencode`, codex `~/.codex`, pi `~/.pi`.
 3. **Project** = the workspace the agent acts on for this session. Declared in `projects/<name>.yaml`. Optional per session. Same agent can work on different projects across sessions.
 
 A session = (agent × project? × session-slug), with the CLI chosen at the shell. The launcher mounts the agent's memory clone and (if specified) the project clone in independent clones of their respective repos. Branches are namespaced per role: the project clone is on `<agent>/<slug>`, the memory clone on `<project>/<slug>` (or a bare `<slug>` when there's no project).
@@ -18,7 +18,7 @@ A session = (agent × project? × session-slug), with the CLI chosen at the shel
 
 ```
 karakum/                    # THIS REPO — version-controlled, generic
-  containers/               Docker images: base, toolchain-* layers, and agent/ (base + toolchains + claude/codex/opencode).
+  containers/               Docker images: base, toolchain-* layers, and agent/ (base + toolchains + claude/codex/opencode/pi).
   Justfile                  Host entry point: thin recipes dispatching to the CLI.
   karakum/                  Python CLI package (uv pip install -e . or uv run karakum).
     cli.py                  Entry point: launch, resume, pngpaste, build, agents, projects, session group (ls / rm / clean / down).

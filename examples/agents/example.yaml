@@ -3,7 +3,7 @@
 # edit, where <config-dir> is $KARAKUM_CONFIG_DIR (default ~/.config/karakum).
 #
 # An agent is decoupled from:
-#   - the CLI it runs with (the one image carries claude, codex, and opencode;
+#   - the CLI it runs with (the one image carries claude, codex, opencode, and pi;
 #     you pick one after `just shell`)
 #   - the project it works on (passed at invocation: `just shell <agent> <project> <slug>`)
 #
@@ -34,7 +34,9 @@ memory:
   #   claude   → ~/.claude/CLAUDE.md
   #   opencode → ~/.config/opencode/AGENTS.md
   #   codex    → ~/.codex/AGENTS.md
+  #   pi       → ~/.pi/agent/AGENTS.md
   # init: |
   #   ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.claude/CLAUDE.md"
   #   ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.config/opencode/AGENTS.md"
   #   ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.codex/AGENTS.md"
+  #   ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.pi/agent/AGENTS.md"

@@ -21,11 +21,11 @@ docker image inspect "$IMAGE" >/dev/null 2>&1 \
   || fail "image $IMAGE missing — run \`just build\` first"
 
 echo "== agent CLIs on PATH =="
-for cli in claude codex opencode; do
+for cli in claude codex opencode pi; do
   docker run --rm "$IMAGE" bash -lc "command -v $cli" >/dev/null 2>&1 \
     || fail "$cli not on PATH in $IMAGE"
 done
-echo "  OK: claude, codex, opencode all present"
+echo "  OK: claude, codex, opencode, pi all present"
 
 WORK="$(mktemp -d)"
 cleanup() {

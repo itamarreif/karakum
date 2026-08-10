@@ -159,9 +159,9 @@ def test_memory_only_session_uses_bare_slug(monkeypatch, tmp_path):
     assert clones == {"scratchpad": "fix-login"}  # no project clone; memory on a bare slug
 
 
-def test_per_cli_state_dirs_created_and_opencode_seeded(monkeypatch, tmp_path):
-    """Each agent CLI gets its own persistent host state dir + env var, and
-    opencode's config is seeded once so it skips the first-run model picker."""
+def test_per_cli_state_dirs_created_and_configs_seeded(monkeypatch, tmp_path):
+    """Each agent CLI gets its own persistent host state dir + env var, and the
+    opencode/pi configs are seeded once so they skip the first-run model picker."""
     import json as _json
 
     mem, proj = tmp_path / "src_mem", tmp_path / "src_proj"
@@ -180,12 +180,18 @@ def test_per_cli_state_dirs_created_and_opencode_seeded(monkeypatch, tmp_path):
     assert env["OPENCODE_CONFIG_DIR"] == str(state / "alice-opencode")
     assert env["OPENCODE_DATA_DIR"] == str(state / "alice-opencode-data")
     assert env["CODEX_STATE_DIR"] == str(state / "alice-codex")
-    for var in ("CLAUDE_STATE_DIR", "OPENCODE_CONFIG_DIR", "OPENCODE_DATA_DIR", "CODEX_STATE_DIR"):
+    assert env["PI_STATE_DIR"] == str(state / "alice-pi")
+    for var in ("CLAUDE_STATE_DIR", "OPENCODE_CONFIG_DIR", "OPENCODE_DATA_DIR", "CODEX_STATE_DIR", "PI_STATE_DIR"):
         assert Path(env[var]).is_dir(), f"{var} dir not created"
 
     seed = _json.loads((state / "alice-opencode" / "opencode.json").read_text())
     assert seed["model"] == "anthropic/claude-sonnet-4-5"
     assert seed["autoupdate"] is False
+
+    # pi keeps everything under ~/.pi/agent, so its settings land one level deeper.
+    pi_seed = _json.loads((state / "alice-pi" / "agent" / "settings.json").read_text())
+    assert pi_seed["defaultProvider"] == "anthropic"
+    assert pi_seed["defaultModel"] == "claude-sonnet-4-20250514"
 
 
 def test_opencode_seed_not_clobbered_when_present(monkeypatch, tmp_path):
@@ -205,3 +211,22 @@ def test_opencode_seed_not_clobbered_when_present(monkeypatch, tmp_path):
     res = CliRunner().invoke(cli.main, ["launch", "alice", "-", "notes"])
     assert isinstance(res.exception, _Exec), res.output
     assert _json.loads((oc / "opencode.json").read_text()) == {"model": "openai/gpt-5"}
+
+
+def test_pi_seed_not_clobbered_when_present(monkeypatch, tmp_path):
+    """A pre-existing pi settings.json (user's own model switch / login) is left untouched."""
+    import json as _json
+
+    mem, proj = tmp_path / "src_mem", tmp_path / "src_proj"
+    _mkrepo(mem)
+    _mkrepo(proj)
+    _wire(monkeypatch, tmp_path, mem, proj)
+    _capture_exec(monkeypatch)
+
+    pi_agent = tmp_path / "data" / "state" / "alice-pi" / "agent"
+    pi_agent.mkdir(parents=True)
+    (pi_agent / "settings.json").write_text(_json.dumps({"defaultModel": "gpt-5"}))
+
+    res = CliRunner().invoke(cli.main, ["launch", "alice", "-", "notes"])
+    assert isinstance(res.exception, _Exec), res.output
+    assert _json.loads((pi_agent / "settings.json").read_text()) == {"defaultModel": "gpt-5"}

@@ -22,8 +22,8 @@ from karakum import session as ksession
 CONTAINER_HOME = "/home/agent"
 
 # The bundled agent image (built by `karakum build` via `docker compose build`,
-# tagged from docker-compose.yaml's `image:`). It carries three interchangeable
-# agent CLIs (claude / codex / opencode) plus every toolchain, so `session clean`
+# tagged from docker-compose.yaml's `image:`). It carries four interchangeable
+# agent CLIs (claude / codex / opencode / pi) plus every toolchain, so `session clean`
 # runs over a session's clones inside it with all clean tools present.
 AGENT_IMAGE = "karakum-agent:latest"
 
@@ -146,7 +146,7 @@ def main():
 @click.argument("project")
 @click.argument("slug")
 def launch(agent, project, slug):
-    """Drop into a session shell (in ~); run claude/codex/opencode from there."""
+    """Drop into a session shell (in ~); run claude/codex/opencode/pi from there."""
     _do_launch(agent, project, slug)
 
 
@@ -156,7 +156,7 @@ def _do_launch(agent, project, slug):
     Ensures the memory clone (branch `<project>/<slug>`, or a bare `<slug>` with no
     project) and, if given, the project clone (branch `<agent>/<slug>`), wires up
     secrets / git identity / per-CLI state, then execs `docker compose run` into a
-    shell. There is one agent image carrying claude/codex/opencode; the user runs
+    shell. There is one agent image carrying claude/codex/opencode/pi; the user runs
     whichever CLI they want once inside. Existing clones are reused in place, so
     this doubles as the `resume` path.
     """
@@ -234,6 +234,7 @@ def _do_launch(agent, project, slug):
         (state_root / f"{agent}-opencode",   "OPENCODE_CONFIG_DIR"),  # → ~/.config/opencode
         (state_root / f"{agent}-opencode-data", "OPENCODE_DATA_DIR"), # → ~/.local/share/opencode
         (state_root / f"{agent}-codex",      "CODEX_STATE_DIR"),      # → ~/.codex
+        (state_root / f"{agent}-pi",         "PI_STATE_DIR"),         # → ~/.pi
     ):
         d.mkdir(parents=True, exist_ok=True)
         env[var] = str(d)
@@ -260,6 +261,25 @@ def _do_launch(agent, project, slug):
             "$schema": "https://opencode.ai/config.json",
             "model": "anthropic/claude-sonnet-4-5",
             "autoupdate": False,
+        }, indent=2))
+
+    # Seed pi's global settings once so it launches into a usable model instead of
+    # the picker. Auth is entirely env-injected (secrets pipeline), no login and no
+    # secret at rest: ANTHROPIC_API_KEY / OPENAI_API_KEY for API billing, or
+    # ANTHROPIC_OAUTH_TOKEN (an sk-ant-oat token) for a Claude subscription — pi
+    # resolves these straight from the env, so no ~/.pi/agent/auth.json is written.
+    # pi keeps everything under ~/.pi/agent — mounted here as <state>/agent — so the
+    # settings file is one level deeper than opencode's. Only written if absent, so
+    # /model switches (and any state pi does persist) survive across runs.
+    pi_agent_dir = state_root / f"{agent}-pi" / "agent"
+    pi_cfg = pi_agent_dir / "settings.json"
+    if not pi_cfg.exists():
+        pi_agent_dir.mkdir(parents=True, exist_ok=True)
+        pi_cfg.write_text(json.dumps({
+            "$schema": "https://raw.githubusercontent.com/badlogic/pi-mono/main/packages/coding-agent/src/core/settings-schema.json",
+            "defaultProvider": "anthropic",
+            "defaultModel": "claude-sonnet-4-20250514",
+            "enableInstallTelemetry": False,
         }, indent=2))
 
     # --- container name (unique per invocation to allow multiple terminals) ---
