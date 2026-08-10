@@ -42,11 +42,19 @@ COPY --from=karakum-toolchain-proto:latest /usr/local/bin/buf         /usr/local
 COPY --from=karakum-toolchain-proto:latest /usr/local/include/google /usr/local/include/google
 
 # --- agent harnesses ---
-# Three interchangeable agent CLIs live on PATH; the user picks one after
-# `just shell`. claude authenticates from CLAUDE_CODE_OAUTH_TOKEN (or
-# ANTHROPIC_API_KEY); opencode + codex read ANTHROPIC_API_KEY / OPENAI_API_KEY
-# from the environment (injected via the secrets pipeline).
+# Four interchangeable agent CLIs live on PATH; the user picks one after
+# `just shell`. All authenticate purely from injected env vars (secrets pipeline),
+# no interactive login: claude from CLAUDE_CODE_OAUTH_TOKEN (or ANTHROPIC_API_KEY);
+# opencode + codex + pi from ANTHROPIC_API_KEY / OPENAI_API_KEY. pi also drives a
+# Claude subscription from ANTHROPIC_OAUTH_TOKEN (an sk-ant-oat token, same kind as
+# CLAUDE_CODE_OAUTH_TOKEN) — see examples/secrets.yaml.
 RUN npm install -g @anthropic-ai/claude-code opencode-ai @openai/codex
+
+# pi (https://pi.dev) ships on its own layer because its official install line
+# uses `--ignore-scripts` (a global npm flag — applying it to the line above could
+# break the others' postinstall). pi keeps all state under ~/.pi/agent, so no XDG
+# parent pre-creation is needed (unlike opencode below).
+RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 
 # opencode/codex follow the XDG base-dir spec and create ~/.config, ~/.local/share,
 # and ~/.local/state at startup. compose bind-mounts *nested* paths under these

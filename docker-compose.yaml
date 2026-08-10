@@ -1,4 +1,4 @@
-# karakum compose: the single `agent` service (one image, three agent CLIs).
+# karakum compose: the single `agent` service (one image, four agent CLIs).
 # Mounts/env are declared here and parameterized by ${VARS} the launcher exports
 # (memory clone, per-agent ~/.claude state). The project clone (optional, so it
 # can't be a static line) and the variable-length secret set are the only things
@@ -7,8 +7,8 @@
 name: karakum
 
 services:
-  # One image, three interchangeable agent CLIs on PATH (claude / codex /
-  # opencode) — the user picks one after `just shell`.
+  # One image, four interchangeable agent CLIs on PATH (claude / codex /
+  # opencode / pi) — the user picks one after `just shell`.
   agent:
     build:
       context: ./containers/agent
@@ -21,6 +21,11 @@ services:
       # at $HOME — outside the mount — so it's lost every run. CLAUDE_CONFIG_DIR
       # moves it into ~/.claude. See anthropics/claude-code#14313.
       CLAUDE_CONFIG_DIR: /home/agent/.claude
+      # Skip pi's startup version-check network call so it launches straight in
+      # (the analog of opencode's seeded autoupdate:false). pi otherwise keeps all
+      # state under ~/.pi/agent — the default PI_CODING_AGENT_DIR — which lands
+      # inside the ~/.pi mount below, so no dir override is needed.
+      PI_SKIP_VERSION_CHECK: "1"
     volumes:
       # Memory session clone (the vault), mounted under the container home
       # at ${MEMORY_MOUNT} (~/<agent>) rather than its host path, so the
@@ -33,7 +38,9 @@ services:
       #   claude   → ~/.claude
       #   opencode → ~/.config/opencode (config) + ~/.local/share/opencode (data/auth)
       #   codex    → ~/.codex
+      #   pi       → ~/.pi (config + sessions under ~/.pi/agent; auth is env-injected)
       - ${CLAUDE_STATE_DIR:-/dev/null}:/home/agent/.claude:rw
       - ${OPENCODE_CONFIG_DIR:-/dev/null}:/home/agent/.config/opencode:rw
       - ${OPENCODE_DATA_DIR:-/dev/null}:/home/agent/.local/share/opencode:rw
       - ${CODEX_STATE_DIR:-/dev/null}:/home/agent/.codex:rw
+      - ${PI_STATE_DIR:-/dev/null}:/home/agent/.pi:rw

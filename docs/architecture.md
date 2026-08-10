@@ -20,7 +20,7 @@ Justfile recipe          →  shell command
 ─────────────────────────────────────────────────────────────
 just build               →  uv run karakum build           (Docker images)
 just install             →  uv pip install -e .            (install the CLI)
-just shell  A [P] [S]     →  uv run karakum launch A P S   (shell in ~; run claude/codex/opencode there)
+just shell  A [P] [S]     →  uv run karakum launch A P S   (shell in ~; run claude/codex/opencode/pi there)
 just resume S            →  uv run karakum resume S        (reopen existing session by slug)
 just agents              →  uv run karakum agents
 just projects            →  uv run karakum projects
@@ -242,9 +242,11 @@ cli.launch(agent, project, slug)   →   _do_launch(agent, project, slug)
 │   ├─ opencode : <state_root>/<agent>-opencode     → ~/.config/opencode      ; OPENCODE_CONFIG_DIR
 │   │             <state_root>/<agent>-opencode-data→ ~/.local/share/opencode ; OPENCODE_DATA_DIR
 │   ├─ codex    : <state_root>/<agent>-codex        → ~/.codex                ; CODEX_STATE_DIR
+│   ├─ pi       : <state_root>/<agent>-pi           → ~/.pi                   ; PI_STATE_DIR
 │   ├─ mkdir -p each ; env[VAR]=dir
 │   ├─ seed <claude>/.claude.json → hasCompletedOnboarding=true   # read-modify-write; skips claude's first-run wizard
 │   └─ seed <opencode>/opencode.json (if absent) → default model + autoupdate:false   # skips opencode's model picker
+│      (pi is NOT seeded — user picks a model, pi persists it in the mount; auth: env keys / ANTHROPIC_OAUTH_TOKEN — no auth.json)
 │
 ├─6 BUILD docker argv
 │   container_name = f"agent-{agent}-{slug_label}-{uuid4[:6]}"
@@ -255,7 +257,7 @@ cli.launch(agent, project, slug)   →   _do_launch(agent, project, slug)
 │                 *_git_signing_args(),                  # SSH commit signing via that agent
 │                 *_terminal_args(),                     # TERM + COLORTERM=truecolor
 │                 "-w", "/home/agent", *secret_docker_args,   # always land in ~
-│                 "agent", "bash"]                       # single agent image; run claude/codex/opencode inside
+│                 "agent", "bash"]                       # single agent image; run claude/codex/opencode/pi inside
 │
 └─7 HANDOFF
     ├─ os.chdir(manifest.karakum_root())    # so compose finds docker-compose.yaml
@@ -286,18 +288,18 @@ cli ─┬─► preflight ──► (subprocess: git; shutil: docker/gh)
   preflight → clone → secrets → argv), then `os.execvpe` *replaces* the Python
   process with `docker compose run`. Nothing after the exec runs; the container's
   `cmd` (`bash`) becomes the foreground process, dropping the user into a shell in
-  `~`. One image carries `claude`, `codex`, and `opencode` on `PATH`; the user
+  `~`. One image carries `claude`, `codex`, `opencode`, and `pi` on `PATH`; the user
   runs whichever they want from that shell.
 
 - **Static vs dynamic contract.** `docker-compose.yaml` is the static half: it
   declares the single `agent` service, the per-CLI state mounts (claude
   `~/.claude`, opencode `~/.config/opencode` + `~/.local/share/opencode`, codex
-  `~/.codex`), and the memory mount (host `${MEMORY_SESSION}` → container
+  `~/.codex`, pi `~/.pi`), and the memory mount (host `${MEMORY_SESSION}` → container
   `${MEMORY_MOUNT}`, i.e. `~/<agent>`). `cli.py` is the dynamic half: it injects
   per-session flags (`-v` project at `~/<name>`, `-w /home/agent`, `-e` env,
   secret `-e` names, `--name`). Compose stays agent/project-agnostic.
 
-- **Orthogonal axes → inputs.** CLI (claude/codex/opencode, chosen inside the
+- **Orthogonal axes → inputs.** CLI (claude/codex/opencode/pi, chosen inside the
   shell) · agent (`<config_dir>/agents/<n>.yaml` → memory) · project
   (`<config_dir>/projects/<n>.yaml`, optional). Secrets are host-wide
   (`<config_dir>/secrets.yaml`), not an axis. `cli.launch` is where agent +

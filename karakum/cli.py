@@ -22,8 +22,8 @@ from karakum import session as ksession
 CONTAINER_HOME = "/home/agent"
 
 # The bundled agent image (built by `karakum build` via `docker compose build`,
-# tagged from docker-compose.yaml's `image:`). It carries three interchangeable
-# agent CLIs (claude / codex / opencode) plus every toolchain, so `session clean`
+# tagged from docker-compose.yaml's `image:`). It carries four interchangeable
+# agent CLIs (claude / codex / opencode / pi) plus every toolchain, so `session clean`
 # runs over a session's clones inside it with all clean tools present.
 AGENT_IMAGE = "karakum-agent:latest"
 
@@ -146,7 +146,7 @@ def main():
 @click.argument("project")
 @click.argument("slug")
 def launch(agent, project, slug):
-    """Drop into a session shell (in ~); run claude/codex/opencode from there."""
+    """Drop into a session shell (in ~); run claude/codex/opencode/pi from there."""
     _do_launch(agent, project, slug)
 
 
@@ -156,7 +156,7 @@ def _do_launch(agent, project, slug):
     Ensures the memory clone (branch `<project>/<slug>`, or a bare `<slug>` with no
     project) and, if given, the project clone (branch `<agent>/<slug>`), wires up
     secrets / git identity / per-CLI state, then execs `docker compose run` into a
-    shell. There is one agent image carrying claude/codex/opencode; the user runs
+    shell. There is one agent image carrying claude/codex/opencode/pi; the user runs
     whichever CLI they want once inside. Existing clones are reused in place, so
     this doubles as the `resume` path.
     """
@@ -234,6 +234,7 @@ def _do_launch(agent, project, slug):
         (state_root / f"{agent}-opencode",   "OPENCODE_CONFIG_DIR"),  # → ~/.config/opencode
         (state_root / f"{agent}-opencode-data", "OPENCODE_DATA_DIR"), # → ~/.local/share/opencode
         (state_root / f"{agent}-codex",      "CODEX_STATE_DIR"),      # → ~/.codex
+        (state_root / f"{agent}-pi",         "PI_STATE_DIR"),         # → ~/.pi
     ):
         d.mkdir(parents=True, exist_ok=True)
         env[var] = str(d)
@@ -261,6 +262,22 @@ def _do_launch(agent, project, slug):
             "model": "anthropic/claude-sonnet-4-5",
             "autoupdate": False,
         }, indent=2))
+
+    # pi is intentionally NOT seeded. Unlike opencode, pi launches into a usable
+    # default without a config, and pinning a defaultModel just risks a stale id
+    # (its catalog drifts every release). So karakum enforces nothing: the user
+    # picks a model with /model, and pi persists that choice — plus sessions, trust,
+    # etc. — to ~/.pi/agent inside the PI_STATE_DIR mount, so it survives across runs.
+    # Auth is env-injected (ANTHROPIC_API_KEY / OPENAI_API_KEY, or ANTHROPIC_OAUTH_TOKEN
+    # for a Claude subscription); nothing is written to ~/.pi/agent/auth.json.
+    #
+    # We do create the ~/.pi/agent dir (empty — no settings). The other CLIs'
+    # instruction dirs exist as mounts (~/.claude, ~/.config/opencode, ~/.codex), but
+    # pi's is a *subdir* of the ~/.pi mount, so without this an agent's memory.init
+    # hook that links its master prompt into ~/.pi/agent/AGENTS.md (pi's global
+    # context file — see resource-loader's AGENTS.md candidates) would fail for lack
+    # of a parent dir. Creating it keeps memory.init uniform across all four CLIs.
+    (state_root / f"{agent}-pi" / "agent").mkdir(parents=True, exist_ok=True)
 
     # --- container name (unique per invocation to allow multiple terminals) ---
     slug_label = slug if not no_session else "main"
