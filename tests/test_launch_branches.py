@@ -189,7 +189,9 @@ def test_per_cli_state_dirs_created_and_opencode_seeded(monkeypatch, tmp_path):
     assert seed["model"] == "anthropic/claude-sonnet-4-5"
     assert seed["autoupdate"] is False
 
-    # pi is not pre-seeded — karakum writes no settings.json for it.
+    # pi's agent dir is created (so a memory.init hook can link AGENTS.md into it,
+    # like the other CLIs' instruction dirs) but NOT seeded — no settings.json.
+    assert (state / "alice-pi" / "agent").is_dir()
     assert not (state / "alice-pi" / "agent" / "settings.json").exists()
 
 

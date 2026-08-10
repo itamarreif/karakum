@@ -34,6 +34,32 @@ how to authenticate it for the two common cases.
 Auth is selected per host in `<config-dir>/secrets.yaml` (see
 [configuration](configuration.md) and [`examples/secrets.yaml`](../examples/secrets.yaml)).
 
+## Wiring the agent's master prompt (scratchpad)
+
+pi reads a global context file from its agent dir — the candidates are
+`AGENTS.override.md`, then `AGENTS.md` (see pi's `resource-loader`). So pi's slot in
+the master-prompt convention is **`~/.pi/agent/AGENTS.md`**, the exact analog of
+claude's `~/.claude/CLAUDE.md`.
+
+Link it from the agent's `memory.init` hook in `agents/<name>.yaml`, alongside the
+other CLIs (karakum runs the hook verbatim after mounts land; it stays
+framework-agnostic, so the link lives in the manifest, not in code):
+
+```yaml
+memory:
+  path: ~/code/you/your-memory-repo
+  repository: github.com/you/your-memory-repo
+  init: |
+    ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.claude/CLAUDE.md"
+    ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.config/opencode/AGENTS.md"
+    ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.codex/AGENTS.md"
+    ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.pi/agent/AGENTS.md"
+```
+
+No `mkdir` is needed for the pi line: the launcher creates `~/.pi/agent` on every
+run (the other three CLIs' instruction dirs already exist as mounts). The link is
+re-made each session (`ln -sfn` is idempotent), so rebuilding the session re-wires it.
+
 ## Personal machine — Claude subscription
 
 `~/.config/karakum/secrets.yaml`:

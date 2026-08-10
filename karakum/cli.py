@@ -270,6 +270,14 @@ def _do_launch(agent, project, slug):
     # etc. — to ~/.pi/agent inside the PI_STATE_DIR mount, so it survives across runs.
     # Auth is env-injected (ANTHROPIC_API_KEY / OPENAI_API_KEY, or ANTHROPIC_OAUTH_TOKEN
     # for a Claude subscription); nothing is written to ~/.pi/agent/auth.json.
+    #
+    # We do create the ~/.pi/agent dir (empty — no settings). The other CLIs'
+    # instruction dirs exist as mounts (~/.claude, ~/.config/opencode, ~/.codex), but
+    # pi's is a *subdir* of the ~/.pi mount, so without this an agent's memory.init
+    # hook that links its master prompt into ~/.pi/agent/AGENTS.md (pi's global
+    # context file — see resource-loader's AGENTS.md candidates) would fail for lack
+    # of a parent dir. Creating it keeps memory.init uniform across all four CLIs.
+    (state_root / f"{agent}-pi" / "agent").mkdir(parents=True, exist_ok=True)
 
     # --- container name (unique per invocation to allow multiple terminals) ---
     slug_label = slug if not no_session else "main"
