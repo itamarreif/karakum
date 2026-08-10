@@ -54,11 +54,49 @@ memory:
     ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.config/opencode/AGENTS.md"
     ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.codex/AGENTS.md"
     ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.pi/agent/AGENTS.md"
+    ln -sfn "$KARAKUM_MEMORY/skills"           "$HOME/.pi/agent/skills"
 ```
 
-No `mkdir` is needed for the pi line: the launcher creates `~/.pi/agent` on every
-run (the other three CLIs' instruction dirs already exist as mounts). The link is
-re-made each session (`ln -sfn` is idempotent), so rebuilding the session re-wires it.
+No `mkdir` is needed for the pi lines: the launcher creates `~/.pi/agent` on every
+run (the other three CLIs' instruction dirs already exist as mounts). The links are
+re-made each session (`ln -sfn` is idempotent), so rebuilding the session re-wires them.
+
+### Why `AGENTS.md`, not `SYSTEM.md`
+
+pi has three injection points (see `resource-loader.ts`):
+
+| File (global / project) | Effect on the prompt |
+|---|---|
+| `AGENTS.md` / `.pi/AGENTS.md` | Loaded as a **context file** — layered on top of pi's built-in system prompt. |
+| `APPEND_SYSTEM.md` / `.pi/APPEND_SYSTEM.md` | **Appended** to pi's built-in system prompt (built-ins kept). |
+| `SYSTEM.md` / `.pi/SYSTEM.md` | **Replaces** pi's built-in system prompt entirely. |
+
+We link the master prompt as `AGENTS.md` because it's a persona/workflow layer meant to
+sit *on top of* the harness, and it's the **only cross-CLI convention** (claude
+`CLAUDE.md`, opencode/codex `AGENTS.md`) — one file links identically for all four.
+`SYSTEM.md` would throw away pi's built-in tool/format/behavior instructions (breaking
+the agent unless you reproduce them) and is pi-only. `APPEND_SYSTEM.md` is a reasonable
+pi-only escalation if you ever need the master prompt enforced at system-prompt strength
+rather than as context — but it doesn't replace the `AGENTS.md` link, it's additive.
+(Project-scoped `SYSTEM.md`/`APPEND_SYSTEM.md` also require the project to be trusted.)
+
+## Wiring skills
+
+pi discovers skills from `~/.pi/agent/skills/` (global) and `.pi/skills/` (project) —
+any subdirectory containing a `SKILL.md` is a skill (see pi's
+[skills.md](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/skills.md)).
+The vault's `skills/<name>/SKILL.md` layout is already exactly this format (required
+frontmatter: `name`, `description`), so no conversion is needed — just point pi's
+skills dir at the vault with the symlink shown in the `memory.init` block above:
+
+```sh
+ln -sfn "$KARAKUM_MEMORY/skills" "$HOME/.pi/agent/skills"
+```
+
+pi then surfaces each skill's `description` in the system prompt (auto-loaded when a
+task matches) and exposes `/skill:<name>` for direct invocation. Extra frontmatter the
+vault uses (e.g. `user-invocable`) is ignored by pi; only `name`/`description` are
+required. This is the pi analog of claude's `~/.claude/skills/`.
 
 ## Personal machine — Claude subscription
 
