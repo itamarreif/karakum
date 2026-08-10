@@ -50,6 +50,7 @@ memory:
   path: ~/code/you/your-memory-repo
   repository: github.com/you/your-memory-repo
   init: |
+    mkdir -p "$HOME/.pi/agent"
     ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.claude/CLAUDE.md"
     ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.config/opencode/AGENTS.md"
     ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.codex/AGENTS.md"
@@ -57,9 +58,12 @@ memory:
     ln -sfn "$KARAKUM_MEMORY/skills"           "$HOME/.pi/agent/skills"
 ```
 
-No `mkdir` is needed for the pi lines: the launcher creates `~/.pi/agent` on every
-run (the other three CLIs' instruction dirs already exist as mounts). The links are
-re-made each session (`ln -sfn` is idempotent), so rebuilding the session re-wires them.
+The launcher also creates `~/.pi/agent` on every run, but the `mkdir -p` keeps the hook
+**self-contained** — it works even on a karakum that predates that change, and doesn't
+rely on launcher internals. Without it, on a missing `~/.pi/agent` both pi links fail
+silently (`memory.init` is non-fatal) and you get the confusing half-state where only
+claude is wired. The links are re-made each session (`ln -sfn` is idempotent), so
+rebuilding re-wires them.
 
 ### Why `AGENTS.md`, not `SYSTEM.md`
 
