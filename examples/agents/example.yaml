@@ -30,12 +30,18 @@ name: example
 memory:
   path: ~/code/you/your-memory-repo
   repository: github.com/you/your-memory-repo
-  # Link the vault's master prompt into every agent CLI's startup instructions
-  # (and, for pi, the vault's skills/ into pi's skill dir):
-  #   claude   → ~/.claude/CLAUDE.md
+  # Link the vault's master prompt into every agent CLI's startup instructions,
+  # and the vault's skills/ into the skill dir of each CLI that has one:
+  #   claude   → ~/.claude/CLAUDE.md          (+ ~/.claude/skills)
   #   opencode → ~/.config/opencode/AGENTS.md
   #   codex    → ~/.codex/AGENTS.md
-  #   pi       → ~/.pi/agent/AGENTS.md  (+ ~/.pi/agent/skills)
+  #   pi       → ~/.pi/agent/AGENTS.md        (+ ~/.pi/agent/skills)
+  # Link skills for *every* CLI that reads a skill dir, not just one: a memory
+  # repo full of skills that the running CLI can't see fails silently — the
+  # agent simply never loads them, and the only symptom is work not getting
+  # done the way the skills describe. Claude Code discovers personal skills at
+  # ~/.claude/skills/<name>/SKILL.md, and only watches that directory if it
+  # existed at startup, so a manifest fixed mid-session needs a fresh launch.
   # The `mkdir -p` keeps the hook self-contained — pi's dir is a subdir of the
   # ~/.pi mount (not a mount point like the others), so it may not exist yet.
   # init: |
@@ -44,4 +50,5 @@ memory:
   #   ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.config/opencode/AGENTS.md"
   #   ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.codex/AGENTS.md"
   #   ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.pi/agent/AGENTS.md"
+  #   ln -sfn "$KARAKUM_MEMORY/skills"           "$HOME/.claude/skills"
   #   ln -sfn "$KARAKUM_MEMORY/skills"           "$HOME/.pi/agent/skills"
