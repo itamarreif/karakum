@@ -2,7 +2,9 @@
 
 In-container `git push`/`pull` authenticate over SSH using your **host SSH agent**,
 forwarded into the container — **no private keys are ever copied into the image**.
-The base image ships `openssh-client` and a pinned GitHub host key. Commit identity
+The base image ships `openssh-client` and GitHub's host keys, fetched at build
+time over TLS from `api.github.com/meta` (not scanned off port 22, which trusts
+whatever answers and writes nothing on failure). Commit identity
 is set separately to the agent (`GIT_AUTHOR_*`/`GIT_COMMITTER_*`), so commits are
 *attributed* to the agent; the same forwarded agent also **SSH-signs** those commits
 when your host is set up for SSH signing (see [Commit signing](#commit-signing)).
@@ -24,7 +26,31 @@ So to use a particular key set (e.g. 1Password's), make that your default agent
 
 If your default agent holds no keys, the symptom is an in-container
 `Permission denied (publickey)` even when host `git` works — check `ssh-add -l` on
-the host (see Verify below).
+the host (see Verify below). `karakum launch` probes this before starting the
+container and warns; see [Launch-time check](#launch-time-check).
+
+## Launch-time check
+
+Every push from inside the container depends on host-side state the container
+can't see, and every way it can go wrong looks identical from in there: a bare
+`Permission denied (publickey)`. So the launcher does the first GitHub handshake
+on the host, before the container starts, and warns on what it finds:
+
+- the default agent is unreachable, or holds no identities;
+- the agent has keys but GitHub rejects them;
+- the handshake doesn't complete in 20s — almost always an unapproved 1Password
+  prompt (see below).
+
+It only ever warns. Offline, an unreachable GitHub, or a host with no
+`known_hosts` entry for github.com are not verdicts about your agent, so they pass
+quietly. The probe never writes to your `known_hosts`.
+
+**The 1Password prompt is the one that bites.** 1Password asks for approval on the
+*host* the first time a key is used. From inside a container that dialog is
+invisible — the push just fails, and the identical command works minutes later
+once someone happens to approve it. Doing the handshake at launch fires that
+prompt while you're still looking at the terminal, and caches the approval for the
+session.
 
 ## Using 1Password keys
 

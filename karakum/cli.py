@@ -214,6 +214,11 @@ def _do_launch(agent, project, slug):
     # `gh` call (gh authenticates solely from GH_TOKEN; git runs over SSH). Warns,
     # never blocks.
     preflight.check_github_token(env.get("GH_TOKEN"))
+    # git in-container runs over the forwarded host agent, so an empty or
+    # unapproved agent only shows up as `Permission denied (publickey)` mid-session,
+    # with the 1Password prompt firing invisibly on the host. Do the handshake here
+    # instead, where the user can see it. Warns, never blocks.
+    preflight.check_ssh_agent()
     env["MEMORY_SESSION"] = str(memory_session)
     # Where the memory clone (vault) mounts inside the container (compose reads
     # MEMORY_MOUNT as the bind target; see docker-compose.yaml). Mounted at

@@ -32,11 +32,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # just is not in Debian repos — install via official script
 RUN curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
 
-# Pin GitHub's host key so SSH (via the forwarded host agent) authenticates
+# Pin GitHub's host keys so SSH (via the forwarded host agent) authenticates
 # non-interactively — without this, the first connection's known-hosts prompt
 # would hang a non-interactive session.
-RUN mkdir -p /etc/ssh \
-    && ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> /etc/ssh/ssh_known_hosts
+#
+# Fetched over TLS from the API rather than scanned off the wire: `ssh-keyscan`
+# trusts whatever answers on port 22 at build time, and on failure writes nothing
+# while `>>` still succeeds — so a DNS blip or a blocked port 22 would silently
+# ship an image whose first `git push` dies on host-key verification. Same class
+# of silent build-time hole as the empty RUST_COMPONENTS that dropped clippy.
+# api.github.com is CA-authenticated, and the guards below turn any failure here
+# into a build error instead.
+RUN set -eux; \
+    mkdir -p /etc/ssh; \
+    curl -fsSL https://api.github.com/meta \
+      | jq -r '.ssh_keys[] | "github.com " + .' > /etc/ssh/ssh_known_hosts; \
+    test -s /etc/ssh/ssh_known_hosts; \
+    grep -q '^github.com ssh-ed25519 ' /etc/ssh/ssh_known_hosts
 
 # GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
