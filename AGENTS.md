@@ -19,6 +19,7 @@ A session = (agent × project? × session-slug), with the CLI chosen at the shel
 ```
 karakum/                    # THIS REPO — version-controlled, generic
   containers/               Docker images: base, toolchain-* layers, and agent/ (base + toolchains + claude/codex/opencode/pi).
+                            openwebui/ is not an image we build — compose overlays + a mock backend for the service harness.
   Justfile                  Host entry point: thin recipes dispatching to the CLI.
   karakum/                  Python CLI package (uv pip install -e . or uv run karakum).
     cli.py                  Entry point: launch, resume, pngpaste, build, agents, projects, session group (ls / rm / clean / down).
@@ -72,11 +73,12 @@ Orchestration logic lives in the Python package (`karakum/`) — including Docke
 - Mount paths inside the container mirror host paths exactly.
 - Session clones (memory + project) are bind-mounted at runtime; the host repos' `.git` is never mounted, so a session can't reach the host's branches/refs/config.
 - New agent CLI = add it to `containers/agent/Dockerfile` (on `PATH`) + persist its state dir in `_do_launch` + mount it in `docker-compose.yaml`. No new service/recipe — it's one image.
+- New **service harness** (a harness that is a server, not a CLI — e.g. Open WebUI) = a compose overlay under `containers/<name>/` + a `karakum` subcommand that chains it onto `docker-compose.yaml`. This is the one case the rule above doesn't cover: it can't live in the agent image because it isn't a binary you run in the shell. State still persists per-agent under `<state_root>/<agent>-<name>`.
 - New build toolchain = new `containers/toolchain-<name>/Dockerfile` + entry in `toolchains.yaml` + COPY into `containers/agent/Dockerfile` + build step in `cli.build`.
 - New agent = new `agents/<name>.yaml`. No code changes.
 - New project = new `projects/<name>.yaml`. No code changes.
 - New secret provider = one function + one dict entry in `karakum/secrets.py`. See the comment block there.
-- **No service ever publishes ports to the host.** All ingress flows through a Tailscale sidecar.
+- **No service ever publishes ports to the host.** All ingress flows through a Tailscale sidecar. A dev-only loopback overlay (e.g. `containers/openwebui/compose.localhost.yaml`) may exist, but must bind `127.0.0.1` explicitly and stay opt-in behind a flag — never part of a default service definition.
 - Tier-1 hardening (`cap_drop: ALL`, `no-new-privileges`, `read_only: true` + tmpfs, `pids_limit`, `mem_limit`) lands as a follow-up commit on the `agent` compose service.
 
 ## Don't

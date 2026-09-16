@@ -116,6 +116,38 @@ export KARAKUM_CONFIG_DIR=~/dotfiles/karakum   # point config at your dotfiles
 export KARAKUM_DATA_DIR=~/.karakum             # (default) session clones + state
 ```
 
+## Service harnesses (`karakum serve`)
+
+Most harnesses are CLIs on `PATH` in the one agent image, chosen inside the session
+shell. Open WebUI is a *server*, so it is a second compose service instead, started
+detached rather than exec'd into:
+
+```bash
+karakum serve <agent>                  # detached, no published port
+karakum serve <agent> --publish        # dev only: 127.0.0.1:3000
+karakum serve <agent> --mock           # bundled fake-Bedrock stub, no AWS needed
+karakum serve <agent> --down           # stop
+```
+
+It takes no `<project>` and no `<slug>`: a chat surface produces no commits, so there
+is no branch to namespace. The agent's memory clone is mounted read-only at `/vault`.
+
+State lives at `<state_root>/<agent>-openwebui` (SQLite `webui.db` with users, chats
+and config, plus `vector_db/`, `uploads/`, `cache/`) — the same per-agent host-dir
+pattern the CLIs use, so the container stays disposable.
+
+Two config keys in `secrets.yaml` drive the model backend; see the commented block in
+`examples/secrets.yaml`. Note that Bedrock's OpenAI-compatible base path is
+`/openai/v1`, **not** `/v1`, and that a trailing slash breaks model discovery.
+
+### Local development without AWS
+
+`--mock` chains `containers/openwebui/compose.mock.yaml`, which serves the stub in
+`containers/openwebui/mock/fake_bedrock.py`: bearer auth, `/openai/v1/chat/completions`
+with streaming and non-streaming, and `/openai/v1/models`. Set `MOCK_MODELS=0` to make
+model discovery 404 — the failure mode where a connection lists no models even though
+completions work.
+
 ## Migration (existing installs)
 
 If `agents/`, `projects/`, or `secrets.yaml` lived in the repo root, or `config.yaml`

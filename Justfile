@@ -37,6 +37,11 @@ smoke:
 shell agent project="-" slug="-":
     uv run karakum launch {{agent}} {{project}} {{slug}}
 
+# Run the Open WebUI service harness for an agent (detached, no published port).
+# Add --publish for local access, --mock to run against the bundled stub, --down to stop.
+serve agent *args:
+    uv run karakum serve {{agent}} {{args}}
+
 # Reopen an existing session by slug (agent + project recovered from disk):
 # just resume <slug>  — or <agent>/<slug> if the slug exists under >1 agent.
 resume slug:

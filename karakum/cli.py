@@ -786,3 +786,97 @@ def session_down(slug, yes):
 
 # backward-compat alias: `karakum sessions` still works
 main.add_command(session_ls, name="sessions")
+
+
+# ---------------------------------------------------------------------------
+# service harness (Open WebUI)
+#
+# `launch` execs a session *shell*; this starts a long-running *server*. The two
+# share preflight/manifest/secrets/state but diverge past that: roughly half of
+# _do_launch (git identity, ssh-agent forwarding, terminal args, claude
+# onboarding, opencode seeding, the pi dir) is meaningless for a container with
+# no TTY and no git, so this is a sibling rather than a flag on that function.
+# ---------------------------------------------------------------------------
+
+COMPOSE_BASE = "docker-compose.yaml"
+COMPOSE_OPENWEBUI = "containers/openwebui/compose.openwebui.yaml"
+COMPOSE_LOCALHOST = "containers/openwebui/compose.localhost.yaml"
+COMPOSE_MOCK = "containers/openwebui/compose.mock.yaml"
+
+
+@main.command("serve")
+@click.argument("agent")
+@click.option("--mock", is_flag=True,
+              help="Point at the bundled fake-Bedrock stub instead of a real endpoint (no AWS).")
+@click.option("--publish", is_flag=True,
+              help="Publish on host loopback (dev only; normally ingress is the Tailscale sidecar).")
+@click.option("--port", default=3000, show_default=True, help="Loopback port for --publish.")
+@click.option("--down", is_flag=True, help="Stop the harness instead of starting it.")
+def serve(agent, mock, publish, port, down):
+    """Run the Open WebUI service harness for AGENT, detached.
+
+    Unlike `launch` there is no TTY, no project clone and no session branch — a
+    chat surface produces no commits, so there is no branch to namespace. The
+    agent's memory clone is mounted read-only; harness state persists under
+    <state_root>/<agent>-openwebui, so the container stays as disposable as the
+    session containers.
+    """
+    preflight.check_tools()
+
+    compose_files = ["-f", COMPOSE_BASE, "-f", COMPOSE_OPENWEBUI]
+    if publish:
+        compose_files += ["-f", COMPOSE_LOCALHOST]
+    if mock:
+        compose_files += ["-f", COMPOSE_MOCK]
+
+    os.chdir(manifest.karakum_root())
+
+    if down:
+        subprocess.run(["docker", "compose", *compose_files, "down"], check=True)
+        return
+
+    # --- memory (vault), read-only ---
+    agent_data = manifest.load(manifest.agent_path(agent))
+    memory_path = manifest.expand_path(manifest.get(agent_data, "memory.path"))
+    memory_repo = manifest.get(agent_data, "memory.repository")
+    preflight.check_repo(memory_path, memory_repo, "memory")
+
+    # --- secrets ---
+    # Same host-wide pipeline as `launch`, but a different exposure: these are
+    # resolved into the *compose process* env for ${VAR} substitution only.
+    # `launch` injects `-e VAR` per secret; here nothing reaches the container
+    # except what the compose `environment:` block names, so GH_TOKEN,
+    # ANTHROPIC_API_KEY et al. stay out of a network-reachable container by
+    # construction. Preserve that if this ever grows an -e passthrough.
+    env_dict, _ = ksecrets.load()
+    env = os.environ.copy()
+    env.update(env_dict)
+
+    # --- per-harness state ---
+    # Suffixed so nothing nests inside the claude mount, matching the
+    # <agent>-opencode / <agent>-codex / <agent>-pi convention.
+    state_dir = config.state_root() / f"{agent}-openwebui"
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    env["MEMORY_SESSION"] = str(memory_path)
+    env["OPENWEBUI_STATE_DIR"] = str(state_dir)
+    env["OPENWEBUI_PORT"] = str(port)
+    env["OPENWEBUI_URL"] = f"http://localhost:{port}"
+    if not mock:
+        env["OPENWEBUI_API_BASE_URL"] = env.get("BEDROCK_API_BASE_URL", "")
+        env["OPENWEBUI_API_KEY"] = env.get("BEDROCK_API_KEY", "")
+        if not env["OPENWEBUI_API_BASE_URL"]:
+            console.warn("BEDROCK_API_BASE_URL unset — no model backend configured "
+                         "(use --mock to run against the bundled stub)")
+
+    if not env.get("WEBUI_SECRET_KEY"):
+        console.warn("WEBUI_SECRET_KEY unset — logins will not survive a restart")
+
+    subprocess.run(["docker", "compose", *compose_files, "up", "-d", "openwebui"],
+                   check=True, env=env)
+
+    console.done(f"openwebui up (state: {state_dir})")
+    if publish:
+        console.info(f"http://localhost:{port}")
+    else:
+        console.detail("no published port; chain --publish for local access")

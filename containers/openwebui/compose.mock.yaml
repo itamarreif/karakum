@@ -1,0 +1,25 @@
+# Optional overlay: swap Bedrock for a local stub so the harness can be exercised
+# with no AWS account and no network.  `karakum serve <agent> --mock`
+#
+# Worth rehearsing before there is a bill attached, because two things about the
+# real endpoint bite: the base path is /openai/v1 rather than /v1, and auth is a
+# bearer token. Setting MOCK_MODELS=0 makes GET /models return 404 — the failure
+# mode where a connection lists zero models even though chat completions work.
+
+services:
+  bedrock-mock:
+    image: python:3.12-slim
+    command: ["python3", "/srv/fake_bedrock.py"]
+    environment:
+      MOCK_TOKEN: test-token
+      MOCK_MODELS: ${MOCK_MODELS:-1}
+      PORT: "8000"
+    volumes:
+      - ./containers/openwebui/mock:/srv:ro
+
+  openwebui:
+    depends_on: [bedrock-mock]
+    environment:
+      # Reachable by service name on the compose network.
+      OPENAI_API_BASE_URL: http://bedrock-mock:8000/openai/v1
+      OPENAI_API_KEY: test-token
