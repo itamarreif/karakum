@@ -14,10 +14,11 @@
 
 services:
   openwebui:
-    # Pinned deliberately. Open WebUI migrated its config storage (single JSON
-    # blob -> one row per dot-notation key) inside the 0.6.x line; a silent :main
-    # bump across a schema migration breaks a running box quietly.
-    image: ghcr.io/open-webui/open-webui:v0.6.42
+    # Pinned deliberately: Open WebUI has already migrated its config storage
+    # (single JSON blob -> one row per dot-notation key), so a silent :main bump
+    # across a schema migration breaks a running box quietly.
+    # 0.9.6+ is required by oikb (see compose.oikb.yaml).
+    image: ghcr.io/open-webui/open-webui:v0.11.3
     restart: unless-stopped
     environment:
       # Bedrock speaks OpenAI-compatible natively — no gateway container. Two
@@ -39,9 +40,15 @@ services:
       # Signs JWTs. Must be stable across restarts or every user is logged out.
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:-}
       ENABLE_SIGNUP: "False"   # first account becomes admin, then the door closes
-      # Personal API keys are stored in the clear and their expires_at column is
-      # never written, so expiry is not enforced. Off unless something needs them.
-      ENABLE_API_KEY: "False"
+      # Required by `karakum serve`'s post-start wiring and by oikb: both
+      # authenticate with an API key, and there is no documented way to mint an
+      # admin token non-interactively. Note the plural — ENABLE_API_KEY (singular)
+      # is silently ignored.
+      #
+      # These keys are stored in the clear and their expires_at column is never
+      # written, so expiry is not enforced. Set False on any instance that isn't
+      # driving the API.
+      ENABLE_API_KEYS: "True"
       WEBUI_URL: ${OPENWEBUI_URL:-http://localhost:3000}
     volumes:
       # Per-harness state under <state_root>/<agent>-openwebui, a host dir owned by

@@ -140,6 +140,42 @@ Two config keys in `secrets.yaml` drive the model backend; see the commented blo
 `examples/secrets.yaml`. Note that Bedrock's OpenAI-compatible base path is
 `/openai/v1`, **not** `/v1`, and that a trailing slash breaks model discovery.
 
+### Wiring the vault in
+
+The CLI harnesses get the vault's master prompt through `memory.init`, which
+symlinks it into each one's instruction file. Open WebUI reads no instruction
+file — a workspace model's system prompt lives in the database — so `serve`
+declares it over the API after start-up instead:
+
+- `POST /api/v1/models/sync` — the full desired workspace-model set. Reconciling,
+  not appending, so it is safe on every launch and edits to `MASTER_PROMPT.md`
+  propagate on the next `serve`.
+- `--knowledge` additionally creates a knowledge collection and runs
+  [oikb](https://docs.openwebui.com/ecosystem/knowledge-base-sync), Open WebUI's
+  own sync tool, watching `/vault/scratchpad`. oikb checksums each file and asks
+  the server what changed, so unchanged notes are never re-embedded.
+
+Nothing writes to `webui.db` directly. That schema has already migrated once
+(config went from a single JSON blob to one row per key), and a writer reaching
+past the API breaks silently on the next migration.
+
+Both steps need `OPENWEBUI_API_KEY_ADMIN` in `secrets.yaml`, and both are skipped
+with a message if it's absent — a harness that is up and usable is not torn down
+because a workspace model couldn't be declared. `--no-sync` skips them outright.
+
+#### One-time bootstrap
+
+An Open WebUI API key acts as the user that created it and can only be minted
+through the UI; there is no documented non-interactive admin token. So, once per
+instance:
+
+1. `karakum serve <agent> --publish`, open it, create the admin account.
+2. Settings → Account → API keys → Create new secret key.
+3. Store it at the `op://` path named in `secrets.yaml`.
+
+Thereafter every launch is declarative. Note that an account holds a **single**
+unnamed key — creating another silently replaces it.
+
 ### Local development without AWS
 
 `--mock` chains `containers/openwebui/compose.mock.yaml`, which serves the stub in

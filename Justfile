@@ -38,7 +38,8 @@ shell agent project="-" slug="-":
     uv run karakum launch {{agent}} {{project}} {{slug}}
 
 # Run the Open WebUI service harness for an agent (detached, no published port).
-# Add --publish for local access, --mock to run against the bundled stub, --down to stop.
+# --publish for local access, --mock for the bundled stub, --knowledge to sync the
+# vault into a knowledge base, --no-sync to skip wiring, --down to stop.
 serve agent *args:
     uv run karakum serve {{agent}} {{args}}
 

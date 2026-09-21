@@ -11,7 +11,7 @@ from pathlib import Path
 
 import click
 
-from karakum import cleanup, config, console, manifest, preflight
+from karakum import cleanup, config, console, manifest, openwebui, preflight
 from karakum import secrets as ksecrets
 from karakum import session as ksession
 
@@ -802,6 +802,7 @@ COMPOSE_BASE = "docker-compose.yaml"
 COMPOSE_OPENWEBUI = "containers/openwebui/compose.openwebui.yaml"
 COMPOSE_LOCALHOST = "containers/openwebui/compose.localhost.yaml"
 COMPOSE_MOCK = "containers/openwebui/compose.mock.yaml"
+COMPOSE_OIKB = "containers/openwebui/compose.oikb.yaml"
 
 
 @main.command("serve")
@@ -812,7 +813,11 @@ COMPOSE_MOCK = "containers/openwebui/compose.mock.yaml"
               help="Publish on host loopback (dev only; normally ingress is the Tailscale sidecar).")
 @click.option("--port", default=3000, show_default=True, help="Loopback port for --publish.")
 @click.option("--down", is_flag=True, help="Stop the harness instead of starting it.")
-def serve(agent, mock, publish, port, down):
+@click.option("--knowledge", is_flag=True,
+              help="Also run oikb, watching the vault and syncing it into a knowledge base.")
+@click.option("--no-sync", is_flag=True,
+              help="Skip wiring the master prompt / knowledge base after start-up.")
+def serve(agent, mock, publish, port, down, knowledge, no_sync):
     """Run the Open WebUI service harness for AGENT, detached.
 
     Unlike `launch` there is no TTY, no project clone and no session branch — a
@@ -828,6 +833,8 @@ def serve(agent, mock, publish, port, down):
         compose_files += ["-f", COMPOSE_LOCALHOST]
     if mock:
         compose_files += ["-f", COMPOSE_MOCK]
+    if knowledge:
+        compose_files += ["-f", COMPOSE_OIKB]
 
     os.chdir(manifest.karakum_root())
 
@@ -880,3 +887,68 @@ def serve(agent, mock, publish, port, down):
         console.info(f"http://localhost:{port}")
     else:
         console.detail("no published port; chain --publish for local access")
+
+    if no_sync:
+        return
+    _wire_memory(agent, memory_path, env, compose_files, knowledge)
+
+
+def _wire_memory(agent, memory_path, env, compose_files, knowledge):
+    """Wire the vault's master prompt (and optionally the vault itself) into the
+    running instance — the Open WebUI analogue of the `memory.init` symlinks.
+
+    Non-fatal throughout: a harness that is up and usable should not be torn down
+    because a workspace model could not be declared. Every failure path says what
+    to do instead.
+    """
+    token = env.get("OPENWEBUI_API_KEY_ADMIN")
+    if not token:
+        console.detail("OPENWEBUI_API_KEY_ADMIN unset — skipping master-prompt wiring "
+                       "(mint a key in Settings > Account, see docs/configuration.md)")
+        return
+
+    # Only reachable over a published port; without one the API is inside the
+    # compose network and the host has no route to it.
+    base = env.get("OPENWEBUI_URL", "")
+    if "localhost" not in base and "127.0.0.1" not in base:
+        console.detail("no host-reachable URL — skipping wiring (chain --publish)")
+        return
+
+    if not openwebui.wait_healthy(base):
+        console.warn(f"{base} did not become healthy — skipping wiring")
+        return
+
+    prompt_path = Path(memory_path) / "MASTER_PROMPT.md"
+    if not prompt_path.exists():
+        console.detail(f"no MASTER_PROMPT.md in {memory_path} — skipping wiring")
+        return
+
+    try:
+        knowledge_ids = []
+        if knowledge:
+            kb_id = openwebui.ensure_knowledge(
+                base, token, f"{agent}-vault", f"{agent}'s memory vault")
+            knowledge_ids.append(kb_id)
+            env["OIKB_KB_ID"] = kb_id
+            # oikb needs the id, which only exists once the server is up, so it
+            # starts in a second pass rather than alongside openwebui.
+            subprocess.run(["docker", "compose", *compose_files, "up", "-d", "oikb"],
+                           check=True, env=env)
+            console.done(f"oikb watching the vault -> knowledge {kb_id}")
+
+        base_model = env.get("OPENWEBUI_DEFAULT_MODEL", "")
+        if not base_model:
+            console.detail("OPENWEBUI_DEFAULT_MODEL unset — skipping workspace model")
+            return
+
+        openwebui.sync_models(base, token, [openwebui.build_model(
+            model_id=agent,
+            name=agent,
+            base_model_id=base_model,
+            system=prompt_path.read_text(),
+            knowledge_ids=knowledge_ids,
+            description=f"{agent} with its memory vault",
+        )])
+        console.done(f"workspace model '{agent}' synced from MASTER_PROMPT.md")
+    except openwebui.OpenWebUIError as e:
+        console.warn(f"wiring failed: {e}")
