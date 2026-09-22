@@ -7,16 +7,17 @@ created: 2026-07-06
 
 # Session orientation
 
-A karakum session mounts the memory clone plus **zero or more** project clones
-under the container home, each on its own role-namespaced branch:
+A karakum session mounts the memory clone plus one clone per repo the project
+declares — a project may be several repos — each on its own role-namespaced
+branch:
 
-| Clone       | Mount (`$VAR`)                           | Branch                                  |
-|-------------|------------------------------------------|-----------------------------------------|
-| memory      | `~/<agent>` (`$KARAKUM_MEMORY`)          | `<project>/<slug>`, `<a+b>/<slug>` with several, or bare `<slug>` |
-| project(s)  | `~/<repo>` (`$KARAKUM_PROJECT`, `$KARAKUM_PROJECTS`) | `<agent>/<slug>` — shared by all of them |
+| Clone       | Mount (`$VAR`)                           | Branch                              |
+|-------------|------------------------------------------|-------------------------------------|
+| memory      | `~/<agent>` (`$KARAKUM_MEMORY`)          | `<project>/<slug>` (or bare `<slug>`) |
+| repo(s)     | `~/<repo>` (`$KARAKUM_PROJECT`, `$KARAKUM_PROJECTS`) | `<agent>/<slug>` — shared by all of them |
 
-Project clones are present only when the session was launched with at least one
-project. `$KARAKUM_PROJECT` is the **first** one; `$KARAKUM_PROJECTS` is every
+Repo clones are present only when the session was launched with a project.
+`$KARAKUM_PROJECT` is the project's **first** repo; `$KARAKUM_PROJECTS` is every
 one, colon-separated like `PATH`.
 Each clone's `origin` points at the repo's GitHub remote, so `gh` resolves the
 PR for the session branch directly.
@@ -34,7 +35,7 @@ in; `agent-session` is the branch-per-session + one-PR workflow you then run.
 ## Run
 
 For each mounted clone — the memory clone (`$KARAKUM_MEMORY`, always present)
-and every project clone in `$KARAKUM_PROJECTS` — run these three and read the raw
+and every repo clone in `$KARAKUM_PROJECTS` — run these three and read the raw
 output:
 
     git -C "$KARAKUM_MEMORY" status -sb        # branch • dirty • ahead/behind upstream
@@ -42,12 +43,12 @@ output:
     (cd "$KARAKUM_MEMORY" && gh pr view --json number,state,isDraft,title,url) 2>/dev/null \
       || echo "no PR for this branch (none yet, or gh not authed)"
 
-Then repeat for each project clone (skip this for a memory-only session):
+Then repeat for each repo clone (skip this for a memory-only session):
 
     for p in ${KARAKUM_PROJECTS//:/ }; do git -C "$p" status -sb; done
 
-Every project clone shares the branch `<agent>/<slug>`, but each has its own
-remote and therefore its own PR — check them separately.
+Every repo clone shares the branch `<agent>/<slug>`, but each has its own remote
+and therefore its own PR — check them separately.
 
 ## Reading it
 

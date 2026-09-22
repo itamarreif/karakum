@@ -148,83 +148,58 @@ def main():
 def launch(agent, project, slug):
     """Drop into a session shell (in ~); run claude/codex/opencode/pi from there.
 
-    PROJECT is one manifest name, several comma-separated (`dewey,mundaneum`), or
-    `-` for a memory-only session.
+    PROJECT is one manifest name (which may itself declare several repos), or `-`
+    for a memory-only session.
     """
     _do_launch(agent, project, slug)
-
-
-def _parse_projects(spec: str) -> list[str]:
-    """Split a `launch` PROJECT argument into project manifest names.
-
-    `-` or empty means a memory-only session. Several projects are comma-separated;
-    order is kept (it decides which one `KARAKUM_PROJECT` points at) and repeats
-    collapse, so `a,a` is the same session as `a`.
-    """
-    if not spec or spec == "-":
-        return []
-    names: list[str] = []
-    for part in spec.split(","):
-        name = part.strip()
-        if name and name not in names:
-            names.append(name)
-    return names
-
-
-def _memory_branch(projects: list[str], slug: str) -> str:
-    """The memory clone's branch: `<projects>/<slug>`, or a bare `<slug>` with none.
-
-    One memory repo is shared across projects, so the branch is namespaced by the
-    project the session serves — that is what keeps each project's vault work
-    separate. A session spanning several joins them with `+`
-    (`dewey+mundaneum/init`), **sorted**, so the branch does not depend on the
-    order they were typed in and re-invoking with the arguments swapped reuses the
-    same branch instead of opening a second one.
-    """
-    if not projects:
-        return slug
-    return f"{'+'.join(sorted(projects))}/{slug}"
 
 
 def _do_launch(agent, project, slug):
     """Host-side prep + exec of a session container (shared by `launch`/`resume`).
 
-    Ensures the memory clone and one clone per project named in `project` (a single
-    name, a comma-separated list, or `-`), wires up secrets / git identity /
-    per-CLI state, then execs `docker compose run` into a shell. There is one agent
-    image carrying claude/codex/opencode/pi; the user runs whichever CLI they want
-    once inside. Existing clones are reused in place, so this doubles as the
-    `resume` path.
+    Ensures the memory clone and one clone per repo the project declares (`-` for
+    a memory-only session), wires up secrets / git identity / per-CLI state, then
+    execs `docker compose run` into a shell. There is one agent image carrying
+    claude/codex/opencode/pi; the user runs whichever CLI they want once inside.
+    Existing clones are reused in place, so this doubles as the `resume` path.
 
-    Branches are namespaced per role: every project clone is on `<agent>/<slug>`,
-    the memory clone on `<projects>/<slug>` — see `_memory_branch`.
+    A project is one *or more* repos (`manifest.project_repos`), so a `platform`
+    project mounts dewey and mundaneum together. Branches stay namespaced per
+    role: every repo clone is on `<agent>/<slug>`, the memory clone on
+    `<project>/<slug>` — one project per session, so that name is unambiguous.
     """
     cmd = "bash"
     preflight.check_tools()
 
     no_session = slug in ("-", "")
-    projects = _parse_projects(project)
+    has_project = project not in ("-", "")
 
-    # --- resolve the projects before touching disk ---
-    # A missing manifest or a mount collision has to fail before *any* clone is
-    # created, including the memory one — a half-built session leaves a directory
-    # the reuse guard in `session.ensure` will later refuse to mount.
+    # --- resolve the project's repos before touching disk ---
+    # There is no point cloning the memory repo before finding out the project
+    # manifest is malformed, so every repo is resolved and checked up front.
     resolved = []
-    for name in projects:
-        proj_data = manifest.load(manifest.project_path(name))
-        proj_path = manifest.expand_path(manifest.get(proj_data, "path"))
-        proj_repo = manifest.get(proj_data, "repository")
-        label = proj_path.name if no_session else ksession.clone_label("project", proj_repo or str(proj_path))
-        resolved.append((name, proj_path, proj_repo, label))
+    if has_project:
+        proj_data = manifest.load(manifest.project_path(project))
+        for entry in manifest.project_repos(proj_data, project):
+            if not entry["path"]:
+                console.error(
+                    f"project '{project}': every repo needs a `path` "
+                    "(top-level for a one-repo project, or per entry under `repos:`)"
+                )
+                raise SystemExit(2)
+            repo_path = manifest.expand_path(entry["path"])
+            repo_url = entry["repository"]
+            label = repo_path.name if no_session else ksession.clone_label("project", repo_url or str(repo_path))
+            resolved.append((repo_path, repo_url, label))
 
-    labels = [r[3] for r in resolved]
-    if collisions := sorted({l for l in labels if labels.count(l) > 1}):
-        console.error(
-            f"projects share a mount name ({', '.join(collisions)}): two repositories "
-            f"with the same basename would land on the same {CONTAINER_HOME}/<name> and "
-            "share one session clone. Launch them in separate sessions."
-        )
-        raise SystemExit(2)
+        labels = [r[2] for r in resolved]
+        if collisions := sorted({l for l in labels if labels.count(l) > 1}):
+            console.error(
+                f"project '{project}' declares repos sharing a mount name "
+                f"({', '.join(collisions)}): both would land on the same "
+                f"{CONTAINER_HOME}/<name> and share one session clone."
+            )
+            raise SystemExit(2)
 
     # --- memory (always present) ---
     # Branch naming lives in _memory_branch.
@@ -243,28 +218,29 @@ def _do_launch(agent, project, slug):
         memory_session = memory_path
         session_name = "main"
     else:
+        memory_branch = f"{project}/{slug}" if has_project else slug
         memory_session = ksession.ensure(
-            memory_path, agent, slug, "agent", memory_repo, _memory_branch(projects, slug))
+            memory_path, agent, slug, "agent", memory_repo, memory_branch)
         session_name = slug
 
-    # --- projects (optional, zero or more) ---
-    # Each project clone mounts at ~/<repo-name>; the agent always lands in ~
-    # itself (see -w below), with the memory clone (~/<agent>) and every project as
-    # siblings under it. Every project branch is namespaced by the agent
-    # (<agent>/<slug>) — they share it, because they are one session's work.
+    # --- the project's repos (optional) ---
+    # Each repo clone mounts at ~/<repo-name>; the agent always lands in ~ itself
+    # (see -w below), with the memory clone (~/<agent>) and every repo as siblings
+    # under it. Every repo branch is namespaced by the agent (<agent>/<slug>) —
+    # they share it, because they are one session's work on one project.
     project_args: list = []
     project_mounts: list[str] = []
-    if projects:
-        for name, proj_path, proj_repo, label in resolved:
-            preflight.check_repo(proj_path, proj_repo, f"project '{name}'")
-            proj_session = proj_path if no_session else ksession.ensure(
-                proj_path, agent, slug, "project", proj_repo, f"{agent}/{slug}")
-            mount = f"{CONTAINER_HOME}/{label}"
-            project_mounts.append(mount)
-            project_args += ["-v", f"{proj_session}:{mount}:rw"]
+    for repo_path, repo_url, label in resolved:
+        preflight.check_repo(repo_path, repo_url, f"project '{project}' repo '{label}'")
+        repo_session = repo_path if no_session else ksession.ensure(
+            repo_path, agent, slug, "project", repo_url or str(repo_path), f"{agent}/{slug}")
+        mount = f"{CONTAINER_HOME}/{label}"
+        project_mounts.append(mount)
+        project_args += ["-v", f"{repo_session}:{mount}:rw"]
 
-        # KARAKUM_PROJECT stays singular and points at the first project, so
-        # everything written against a one-project session keeps working.
+    if project_mounts:
+        # KARAKUM_PROJECT stays singular and points at the project's first repo, so
+        # everything written against a one-repo project keeps working.
         # KARAKUM_PROJECTS carries all of them, colon-separated like PATH.
         project_args += [
             "-e", f"KARAKUM_PROJECT={project_mounts[0]}",
@@ -383,17 +359,20 @@ def _do_launch(agent, project, slug):
 def _project_for_label(label: str) -> "str | None":
     """Map a session clone label (a repo basename) back to a project manifest name.
 
-    `session.ensure` labels a project clone by its repository's last path segment;
-    this reverses that through the projects manifests so `resume` can hand a name
-    back to the launch path. Returns None if no manifest's repository matches.
+    `session.ensure` labels a clone by its repository's last path segment; this
+    reverses that through the projects manifests so `resume` can hand a name back
+    to the launch path. A project may declare several repos, so *any* of them
+    matching identifies the project. Returns None if none does — a stale or
+    renamed manifest, which `resume` reports rather than guessing around.
     """
     projects_dir = manifest.config_dir() / "projects"
     if not projects_dir.is_dir():
         return None
     for path in sorted(projects_dir.glob("*.yaml")):
-        repo = (manifest.get(manifest.load(path), "repository") or "").rstrip("/")
-        if repo and repo.split("/")[-1] == label:
-            return path.stem
+        for entry in manifest.project_repos(manifest.load(path), path.stem):
+            repo = (entry["repository"] or "").rstrip("/")
+            if repo and repo.split("/")[-1] == label:
+                return path.stem
     return None
 
 
@@ -403,29 +382,31 @@ def resume(spec):
     """Reopen an existing session: `karakum resume <slug>` (or `<agent>/<slug>`).
 
     Resolves the session on disk — erroring if a bare slug exists under multiple
-    agents — recovers its agent + projects from the clones already there, and
-    relaunches a shell into the same branches. A session spanning several projects
-    reopens all of them. Use `just shell <agent> <project> <slug>` to create a new
-    session, or to reopen a subset of one.
+    agents — recovers its agent + project from the clones already there, and
+    relaunches a shell into the same branches. A project's repos all belong to the
+    one project, so a multi-repo session reopens from a single name. Use
+    `just shell <agent> <project> <slug>` to create a new session.
     """
     session = _resolve_session(spec)
 
-    # Sorted so the reconstructed spec is stable across runs; ordering only
-    # decides which project KARAKUM_PROJECT points at, and the clones already
-    # exist either way.
     proj_labels = sorted(c.label for c in session.clones if c.label != "scratchpad")
 
-    names = []
-    for label in proj_labels:
-        name = _project_for_label(label)
-        if name is None:
-            raise click.ClickException(
-                f"can't map clone '{label}' back to a project manifest; "
-                f"reopen explicitly with 'just shell {session.agent} <project> {session.slug}'."
-            )
-        names.append(name)
+    names = {_project_for_label(label) for label in proj_labels}
+    if None in names:
+        unmapped = sorted(l for l in proj_labels if _project_for_label(l) is None)
+        raise click.ClickException(
+            f"can't map clone(s) {', '.join(unmapped)} back to a project manifest; "
+            f"reopen explicitly with 'just shell {session.agent} <project> {session.slug}'."
+        )
+    if len(names) > 1:
+        raise click.ClickException(
+            f"session {session.agent}/{session.slug} holds clones from more than one project "
+            f"({', '.join(sorted(names))}) — karakum mounts one project per session, so this "
+            "session predates that or was assembled by hand. Reopen explicitly with "
+            f"'just shell {session.agent} <project> {session.slug}'."
+        )
 
-    _do_launch(session.agent, ",".join(names) if names else "-", session.slug)
+    _do_launch(session.agent, names.pop() if names else "-", session.slug)
 
 
 @main.command("pngpaste")
@@ -601,18 +582,20 @@ def _clean_builtins(tc: dict) -> list[tuple[str, str]]:
 def _clean_map_from_projects(projects: list[dict]) -> dict[str, list[str]]:
     """Map clone label (repo basename) -> custom clean commands, from project dicts.
 
-    The key matches the clone label `session.ensure` derives from the manifest's
-    `repository` (its last path segment), so a session's project clone can look
-    up its override. Projects without `clean` are omitted.
+    The key matches the clone label `session.ensure` derives from a repo's
+    `repository` (its last path segment), so a session's clone can look up its
+    override. `clean` is per *repo*, not per project — a multi-repo project's
+    entries each carry their own. Repos without `clean` are omitted.
     """
     out: dict[str, list[str]] = {}
     for data in projects:
-        if not (clean := data.get("clean")):
-            continue
-        repo = (data.get("repository") or "").rstrip("/")
-        label = repo.split("/")[-1] if repo else (data.get("name") or "")
-        if label:
-            out[label] = _as_list(clean)
+        for entry in manifest.project_repos(data, data.get("name") or ""):
+            if not (clean := entry["clean"]):
+                continue
+            repo = (entry["repository"] or "").rstrip("/")
+            label = repo.split("/")[-1] if repo else (data.get("name") or "")
+            if label:
+                out[label] = _as_list(clean)
     return out
 
 

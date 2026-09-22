@@ -10,11 +10,11 @@ karakum decouples three things that older agent systems conflate:
 
 1. **CLI** = which agent you drive. The single agent image carries `claude`, `codex`, `opencode`, and `pi` on `PATH`; you pick one **inside** the session shell — it is not a launch argument. (The image's build toolchains — node/python/rust/proto — are pinned in `toolchains.yaml`.)
 2. **Agent** = identity. Has a name + memory (the persistent self: skills, scratchpad, master prompt). Declared in `agents/<name>.yaml`. **No** CLI field, **no** project field — agents are portable across both. Secrets are host-wide, not per-agent (declared once in `secrets.yaml`). Each CLI's state persists in a per-agent host dir under `<state_root>` (default `~/.karakum/state`): claude `~/.claude`, opencode `~/.config/opencode` + `~/.local/share/opencode`, codex `~/.codex`, pi `~/.pi`.
-3. **Project** = the workspace the agent acts on for this session. Declared in `projects/<name>.yaml`. Optional per session, and there may be **more than one** — pass them comma-separated (`just shell takwin dewey,mundaneum init`). Same agent can work on different projects across sessions.
+3. **Project** = the workspace the agent acts on for this session. Declared in `projects/<name>.yaml`. Optional per session. **A project is one *or more* repos** — `projects/platform.yaml` can list dewey and mundaneum, and the session mounts both. Same agent can work on different projects across sessions.
 
-A session = (agent × project* × session-slug), with the CLI chosen at the shell. The launcher mounts the agent's memory clone and one clone per project, each independent. Branches are namespaced per role: every project clone is on `<agent>/<slug>`; the memory clone is on `<project>/<slug>`, or `<a+b>/<slug>` with several (sorted, so the order they were typed in doesn't open a second branch), or a bare `<slug>` when there's no project.
+A session = (agent × project? × session-slug), with the CLI chosen at the shell. The launcher mounts the agent's memory clone and one clone per repo the project declares, each independent. Branches are namespaced per role: every repo clone is on `<agent>/<slug>`, the memory clone on `<project>/<slug>` (or a bare `<slug>` when there's no project) — one project per session, so that name is unambiguous however many repos it holds.
 
-Two repositories whose names share a basename can't be mounted in one session — they would collide on `~/<name>` — and the launcher refuses before creating any clone. Reuse of an existing clone never switches its branch: relaunching a slug with a different project set leaves the memory clone where it was and warns, naming both branches.
+Two repos whose names share a basename can't be in one project — they would collide on `~/<name>` — and the launcher refuses before creating any clone. Reuse of an existing clone never switches its branch: it is left where it is, and a mismatch warns naming both branches.
 
 ## Layout
 

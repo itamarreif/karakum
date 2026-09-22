@@ -68,3 +68,62 @@ def get(data: dict, key_path: str):
 
 def expand_path(s: str) -> Path:
     return Path(s).expanduser()
+
+
+def project_repos(data: dict, name: str = "") -> list[dict]:
+    """Every repo a project declares, normalized to `{path, repository, clean}`.
+
+    A project is one *or more* repos — `platform` may be dewey + mundaneum, and a
+    session mounts all of them. Two spellings, same result:
+
+        path: ~/code/x            # shorthand: a one-repo project
+        repository: github.com/o/x
+
+        repos:                    # general form
+          - {path: ~/code/a, repository: github.com/o/a}
+          - {path: ~/code/b, repository: github.com/o/b, clean: [...]}
+
+    `clean` stays attached to the repo it cleans, so a multi-repo project can
+    override per repo. Declaring both spellings is an error rather than a merge —
+    it reads as a half-finished edit, and guessing which one wins is worse than
+    saying so.
+
+    This normalizes *shape* only: a missing `path` or `repository` comes back as
+    None. Requiring them is the launcher's job, because the other callers
+    (`resume`'s label lookup, the `session clean` map) read every manifest on the
+    host and must not die on one that is incomplete or not theirs.
+    """
+    label = f"project '{name}'" if name else "project"
+    # `is not None` rather than truthiness: `repos: []` is a mistake worth
+    # reporting, not a project that silently falls back to the shorthand form.
+    has_repos = data.get("repos") is not None
+    repos = data.get("repos")
+    top = data.get("path") or data.get("repository")
+
+    if has_repos and top:
+        console.error(
+            f"{label} declares both `repos:` and a top-level `path`/`repository` — "
+            "use one. The top-level form is shorthand for a single-entry `repos:`."
+        )
+        raise SystemExit(2)
+
+    if has_repos:
+        if not isinstance(repos, list):
+            console.error(f"{label}: `repos:` must be a list")
+            raise SystemExit(2)
+        if not repos:
+            console.error(f"{label}: `repos:` is empty")
+            raise SystemExit(2)
+        out = []
+        for i, entry in enumerate(repos):
+            if not isinstance(entry, dict):
+                console.error(f"{label}: repos[{i}] must be a mapping")
+                raise SystemExit(2)
+            out.append({"path": entry.get("path"),
+                        "repository": entry.get("repository"),
+                        "clean": entry.get("clean")})
+        return out
+
+    return [{"path": data.get("path"),
+             "repository": data.get("repository"),
+             "clean": data.get("clean")}]

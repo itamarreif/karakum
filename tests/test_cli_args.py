@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from karakum import cli
+from karakum import cli, manifest
 
 
 def _fake_git_config(values: dict):
@@ -130,26 +130,40 @@ def test_gh_env_none_when_secrets_have_no_token(monkeypatch):
     assert cli._gh_env() is None
 
 
-# --- _parse_projects / _memory_branch --------------------------------------
+# --- manifest.project_repos -------------------------------------------------
 
-@pytest.mark.parametrize("spec,expected", [
-    ("-", []),
-    ("", []),
-    ("dewey", ["dewey"]),
-    ("dewey,mundaneum", ["dewey", "mundaneum"]),
-    (" dewey , mundaneum ", ["dewey", "mundaneum"]),   # whitespace tolerated
-    ("dewey,dewey", ["dewey"]),                        # repeats collapse
-    ("dewey,,mundaneum", ["dewey", "mundaneum"]),      # empty segments dropped
-])
-def test_parse_projects(spec, expected):
-    assert cli._parse_projects(spec) == expected
+def test_project_repos_shorthand_is_one_repo():
+    """The single-repo spelling is shorthand for a one-entry `repos:`."""
+    out = manifest.project_repos({"name": "x", "path": "~/a", "repository": "github.com/o/a"})
+    assert out == [{"path": "~/a", "repository": "github.com/o/a", "clean": None}]
 
 
-@pytest.mark.parametrize("projects,expected", [
-    ([], "init"),                                        # memory-only -> bare slug
-    (["dewey"], "dewey/init"),                           # unchanged from single-project
-    (["dewey", "mundaneum"], "dewey+mundaneum/init"),
-    (["mundaneum", "dewey"], "dewey+mundaneum/init"),    # sorted: order-independent
-])
-def test_memory_branch(projects, expected):
-    assert cli._memory_branch(projects, "init") == expected
+def test_project_repos_list_keeps_order_and_per_repo_clean():
+    out = manifest.project_repos({"name": "platform", "repos": [
+        {"path": "~/a", "repository": "github.com/o/a"},
+        {"path": "~/b", "repository": "github.com/o/b", "clean": ["cargo clean"]},
+    ]})
+    assert [r["path"] for r in out] == ["~/a", "~/b"]
+    assert out[1]["clean"] == ["cargo clean"]
+
+
+def test_project_repos_rejects_both_spellings():
+    """Merging them would mean guessing which wins; a half-finished edit should say so."""
+    with pytest.raises(SystemExit):
+        manifest.project_repos({"path": "~/a", "repos": [{"path": "~/b"}]}, "x")
+
+
+def test_project_repos_rejects_empty_and_non_list():
+    with pytest.raises(SystemExit):
+        manifest.project_repos({"repos": []}, "x")
+    with pytest.raises(SystemExit):
+        manifest.project_repos({"repos": "~/a"}, "x")
+    with pytest.raises(SystemExit):
+        manifest.project_repos({"repos": ["~/a"]}, "x")
+
+
+def test_project_repos_normalizes_shape_only():
+    """Missing fields come back as None — `resume` and the clean map read every
+    manifest on the host and must not die on an incomplete one."""
+    assert manifest.project_repos({"name": "x", "clean": "make clean"}) == [
+        {"path": None, "repository": None, "clean": "make clean"}]

@@ -70,8 +70,8 @@ def ensure(repo: Path, agent: str, slug: str, role: str, repo_label: str, branch
             # Reuse is deliberately non-destructive: an existing clone is left on
             # whatever branch it is on, and is NOT switched to `branch`. So report
             # what is actually checked out, not what was asked for — they diverge
-            # whenever a slug is relaunched with a different project set, since the
-            # memory branch is derived from the projects (`<a+b>/<slug>`).
+            # when a project is renamed, or when someone checked out another branch
+            # inside the clone mid-session.
             actual = current_branch(session)
             if actual and actual != branch:
                 console.warn(

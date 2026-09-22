@@ -85,17 +85,26 @@ def test_resume_with_project_maps_label_to_name(monkeypatch):
     assert calls[0] == ("alice", "web", "fix-login")
 
 
-def test_resume_multiple_projects_reopens_all(monkeypatch):
-    """A session spanning several projects reopens every one, not an error.
-
-    Labels are sorted so the reconstructed spec is stable run to run."""
-    _patch_sessions(monkeypatch, [_sess("alice", "big", ["scratchpad", "webapp", "api"])])
-    monkeypatch.setattr(cli, "_project_for_label", lambda label: {"webapp": "web", "api": "svc"}.get(label))
+def test_resume_multi_repo_project_reopens_from_one_name(monkeypatch):
+    """A project's repos all map back to the same project, so resume needs one name."""
+    _patch_sessions(monkeypatch, [_sess("alice", "big", ["scratchpad", "dewey", "mundaneum"])])
+    monkeypatch.setattr(cli, "_project_for_label", lambda label: "platform")
     calls = _capture_launch(monkeypatch)
     res = CliRunner().invoke(cli.main, ["resume", "big"])
     assert res.exit_code == 0, _text(res)
-    # labels sorted -> api, webapp -> names svc, web
-    assert calls[0] == ("alice", "svc,web", "big")
+    assert calls[0] == ("alice", "platform", "big")
+
+
+def test_resume_errors_when_clones_span_two_projects(monkeypatch):
+    """One project per session — a session holding two predates that or was hand-made."""
+    _patch_sessions(monkeypatch, [_sess("alice", "big", ["scratchpad", "webapp", "api"])])
+    monkeypatch.setattr(cli, "_project_for_label",
+                        lambda label: {"webapp": "web", "api": "svc"}.get(label))
+    calls = _capture_launch(monkeypatch)
+    res = CliRunner().invoke(cli.main, ["resume", "big"])
+    assert res.exit_code != 0
+    assert "more than one project" in _text(res)
+    assert calls == []
 
 
 def test_resume_errors_when_one_of_several_labels_is_unmappable(monkeypatch):
