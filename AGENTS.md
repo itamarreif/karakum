@@ -28,8 +28,9 @@ karakum/                    # THIS REPO — version-controlled, generic
     secrets.py              Secret resolution (op://, env://); pluggable providers.
     session.py              Per-session isolated clone lifecycle.
     cleanup.py              Session listing (iter_sessions, pr_states) + remove.
+  docs/                     Per-topic guides. openwebui.md covers the service harness (wiring, master prompt, knowledge sync, gotchas); pi.md the pi CLI.
   examples/                 Genericized seed config (agents/, projects/, secrets.yaml, toolchains.yaml) → copy into the config dir.
-  docker-compose.yaml       The single `agent` service (mount + env contract).
+  docker-compose.yaml       The single `agent` service (mount + env contract). Service harnesses chain overlays from containers/<name>/.
   pyproject.toml            Python package definition; deps: click, pyyaml.
 
 $KARAKUM_CONFIG_DIR/        # YOUR CONFIG (default ~/.config/karakum) — NOT in this repo

@@ -118,6 +118,9 @@ export KARAKUM_DATA_DIR=~/.karakum             # (default) session clones + stat
 
 ## Service harnesses (`karakum serve`)
 
+> Full detail — wiring, the master prompt, knowledge sync, backups and gotchas —
+> lives in [docs/openwebui.md](openwebui.md). This section is the config surface only.
+
 Most harnesses are CLIs on `PATH` in the one agent image, chosen inside the session
 shell. Open WebUI is a *server*, so it is a second compose service instead, started
 detached rather than exec'd into:
