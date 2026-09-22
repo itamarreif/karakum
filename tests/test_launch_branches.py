@@ -330,3 +330,44 @@ def test_colliding_repo_basenames_refuse_to_launch(monkeypatch, tmp_path):
     assert res.exit_code == 2, res.output
     # and it failed before creating any clone
     assert not (tmp_path / "data" / "sessions" / "alice" / "init").exists()
+
+
+def _out(res):
+    """CliRunner captures stdout/stderr itself, so console output lands here."""
+    return res.output + (res.stderr or "")
+
+
+def test_relaunching_a_slug_with_fewer_projects_reports_the_real_branch(monkeypatch, tmp_path):
+    """Reuse never switches branches, so the log must say what is checked out.
+
+    Launching `a,b` puts the memory clone on `a+b/<slug>`. Relaunching the same
+    slug with just `a` asks for `a/<slug>`, reuses the existing clone, and leaves
+    it on `a+b/<slug>` — previously it logged the branch it had *asked* for."""
+    _two_projects(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.os, "execvpe", lambda *a, **k: (_ for _ in ()).throw(_Exec()))
+
+    CliRunner().invoke(cli.main, ["launch", "alice", "dewey,mundaneum", "init"])
+    assert _clones(tmp_path, "alice", "init")["scratchpad"] == "dewey+mundaneum/init"
+
+    res = CliRunner().invoke(cli.main, ["launch", "alice", "dewey", "init"])
+    assert isinstance(res.exception, _Exec), res.output
+    text = _out(res)
+
+    # the clone is untouched...
+    assert _clones(tmp_path, "alice", "init")["scratchpad"] == "dewey+mundaneum/init"
+    # ...and the log says so, naming both the real branch and the one asked for
+    assert "dewey+mundaneum/init" in text
+    assert "NOT dewey/init" in text
+
+
+def test_reuse_on_the_same_branch_stays_quiet(monkeypatch, tmp_path):
+    """Relaunching the same slug with the same projects is the normal resume path
+    and must not warn."""
+    _two_projects(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.os, "execvpe", lambda *a, **k: (_ for _ in ()).throw(_Exec()))
+
+    CliRunner().invoke(cli.main, ["launch", "alice", "dewey,mundaneum", "init"])
+    res = CliRunner().invoke(cli.main, ["launch", "alice", "dewey,mundaneum", "init"])
+    assert isinstance(res.exception, _Exec), res.output
+    assert "NOT" not in _out(res)
+    assert "reusing agent session" in _out(res)

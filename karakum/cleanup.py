@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from karakum import config, console
+from karakum import session as ksession
 
 
 @dataclass(frozen=True)
@@ -54,11 +55,7 @@ def iter_sessions(agent: str | None = None) -> list[Session]:
             for label_dir in sorted(p for p in slug_dir.iterdir() if p.is_dir()):
                 if not (label_dir / ".git").is_dir():
                     continue
-                r = subprocess.run(
-                    ["git", "-C", str(label_dir), "rev-parse", "--abbrev-ref", "HEAD"],
-                    capture_output=True, text=True,
-                )
-                branch = r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else inferred_branch
+                branch = ksession.current_branch(label_dir) or inferred_branch
                 clones.append(Clone(label=label_dir.name, path=label_dir, branch=branch))
             if clones:
                 sessions.append(

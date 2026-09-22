@@ -14,7 +14,7 @@ karakum decouples three things that older agent systems conflate:
 
 A session = (agent × project* × session-slug), with the CLI chosen at the shell. The launcher mounts the agent's memory clone and one clone per project, each independent. Branches are namespaced per role: every project clone is on `<agent>/<slug>`; the memory clone is on `<project>/<slug>`, or `<a+b>/<slug>` with several (sorted, so the order they were typed in doesn't open a second branch), or a bare `<slug>` when there's no project.
 
-Two repositories whose names share a basename can't be mounted in one session — they would collide on `~/<name>` — and the launcher refuses before creating any clone.
+Two repositories whose names share a basename can't be mounted in one session — they would collide on `~/<name>` — and the launcher refuses before creating any clone. Reuse of an existing clone never switches its branch: relaunching a slug with a different project set leaves the memory clone where it was and warns, naming both branches.
 
 ## Layout
 
