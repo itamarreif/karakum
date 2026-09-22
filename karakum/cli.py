@@ -376,20 +376,44 @@ def _project_for_label(label: str) -> "str | None":
     return None
 
 
-@main.command("resume")
-@click.argument("spec")
-def resume(spec):
-    """Reopen an existing session: `karakum resume <slug>` (or `<agent>/<slug>`).
+def _project_from_memory_branch(session) -> "str | None":
+    """Recover the project name from the memory clone's branch.
 
-    Resolves the session on disk — erroring if a bare slug exists under multiple
-    agents — recovers its agent + project from the clones already there, and
-    relaunches a shell into the same branches. A project's repos all belong to the
-    one project, so a multi-repo session reopens from a single name. Use
-    `just shell <agent> <project> <slug>` to create a new session.
+    The launcher already *records* it there — the memory branch is
+    `<project>/<slug>`, or a bare `<slug>` with no project — so resume reads the
+    name instead of inferring it, which is simply the more direct route.
+
+    It is also the only reliable one. Reversing a clone label means searching the
+    manifests for a repo, and the same repo can appear in more than one of them —
+    not an intended configuration, but it happens mid-migration, and the label is
+    identical either way. Reading the branch cannot pick the wrong project.
+
+    Returns "-" for a memory-only session, the project name when the branch has
+    the expected shape, or None when it does not — a hand-checked-out branch, or
+    a clone whose branch could not be read — leaving the caller to fall back.
     """
-    session = _resolve_session(spec)
+    mem = next((c for c in session.clones if c.label == "scratchpad"), None)
+    if mem is None or not mem.branch:
+        return None
+    if mem.branch == session.slug:
+        return "-"
+    suffix = f"/{session.slug}"
+    if mem.branch.endswith(suffix):
+        return mem.branch[: -len(suffix)] or None
+    return None
 
+
+def _project_from_clone_labels(session) -> str:
+    """Fallback: map the session's clone labels back to a project manifest.
+
+    Only used when the branch does not carry the answer — chiefly sessions created
+    before it was read back. It searches the manifests for a repo, so it can land
+    on the wrong project if two declare the same one; it raises rather than
+    guessing when it cannot decide at all.
+    """
     proj_labels = sorted(c.label for c in session.clones if c.label != "scratchpad")
+    if not proj_labels:
+        return "-"
 
     names = {_project_for_label(label) for label in proj_labels}
     if None in names:
@@ -405,8 +429,26 @@ def resume(spec):
             "session predates that or was assembled by hand. Reopen explicitly with "
             f"'just shell {session.agent} <project> {session.slug}'."
         )
+    return names.pop()
 
-    _do_launch(session.agent, names.pop() if names else "-", session.slug)
+
+@main.command("resume")
+@click.argument("spec")
+def resume(spec):
+    """Reopen an existing session: `karakum resume <slug>` (or `<agent>/<slug>`).
+
+    Resolves the session on disk — erroring if a bare slug exists under multiple
+    agents — recovers its agent + project and relaunches a shell into the same
+    branches. The project comes from the memory clone's branch, where the launcher
+    recorded it; clone labels are only a fallback, because one repo can belong to
+    several projects. Use `just shell <agent> <project> <slug>` to create a new
+    session.
+    """
+    session = _resolve_session(spec)
+    project = _project_from_memory_branch(session)
+    if project is None:
+        project = _project_from_clone_labels(session)
+    _do_launch(session.agent, project, session.slug)
 
 
 @main.command("pngpaste")
