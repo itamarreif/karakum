@@ -4,6 +4,18 @@ from pathlib import Path
 from karakum import config, console
 
 
+def clone_label(role: str, repo_label: str) -> str:
+    """The clone's directory name inside a session, and its mount basename.
+
+    `scratchpad` for the agent memory repo; otherwise the repository's last path
+    segment, so the name doesn't depend on where the repo happens to be checked
+    out on the host. Callers need this rule before `ensure` runs — a session
+    mounting several projects has to detect two repositories sharing a basename
+    *before* creating clones, since they would land on the same path.
+    """
+    return "scratchpad" if role == "agent" else repo_label.rstrip("/").split("/")[-1]
+
+
 def ensure(repo: Path, agent: str, slug: str, role: str, repo_label: str, branch: str) -> Path:
     """Create (or reuse) an isolated clone of `repo` for this session.
 
@@ -27,13 +39,13 @@ def ensure(repo: Path, agent: str, slug: str, role: str, repo_label: str, branch
 
     `role` ("agent" or "project") and `repo_label` (the manifest's canonical
     `repository`, e.g. `github.com/owner/repo`) label log output — a session
-    spans one clone per repo, so the two lines otherwise look like a duplicate.
+    spans one clone per repo and may mount several projects, so the lines
+    otherwise look like duplicates.
     `repo_label` is used instead of the local directory name so the line doesn't
     depend on where the repo happens to be checked out.
     """
     repo = Path(repo).resolve()
-    label = "scratchpad" if role == "agent" else repo_label.rstrip("/").split("/")[-1]
-    session = config.sessions_root() / agent / slug / label
+    session = config.sessions_root() / agent / slug / clone_label(role, repo_label)
 
     if session.exists():
         # Reuse only a real karakum clone (`.git` is a directory). A `.git` *file*

@@ -85,13 +85,29 @@ def test_resume_with_project_maps_label_to_name(monkeypatch):
     assert calls[0] == ("alice", "web", "fix-login")
 
 
-def test_resume_multiple_projects_errors(monkeypatch):
+def test_resume_multiple_projects_reopens_all(monkeypatch):
+    """A session spanning several projects reopens every one, not an error.
+
+    Labels are sorted so the reconstructed spec is stable run to run."""
     _patch_sessions(monkeypatch, [_sess("alice", "big", ["scratchpad", "webapp", "api"])])
+    monkeypatch.setattr(cli, "_project_for_label", lambda label: {"webapp": "web", "api": "svc"}.get(label))
+    calls = _capture_launch(monkeypatch)
+    res = CliRunner().invoke(cli.main, ["resume", "big"])
+    assert res.exit_code == 0, _text(res)
+    # labels sorted -> api, webapp -> names svc, web
+    assert calls[0] == ("alice", "svc,web", "big")
+
+
+def test_resume_errors_when_one_of_several_labels_is_unmappable(monkeypatch):
+    """One unknown clone still fails the whole resume — a partial reopen would
+    silently drop a repo the session was working on."""
+    _patch_sessions(monkeypatch, [_sess("alice", "big", ["scratchpad", "webapp", "ghost"])])
+    monkeypatch.setattr(cli, "_project_for_label", lambda label: "web" if label == "webapp" else None)
     calls = _capture_launch(monkeypatch)
     res = CliRunner().invoke(cli.main, ["resume", "big"])
     assert res.exit_code != 0
-    assert "multiple projects" in _text(res)
-    assert calls == []  # never launched
+    assert "ghost" in _text(res)
+    assert calls == []
 
 
 def test_resume_unmappable_label_errors(monkeypatch):

@@ -212,3 +212,121 @@ def test_opencode_seed_not_clobbered_when_present(monkeypatch, tmp_path):
     res = CliRunner().invoke(cli.main, ["launch", "alice", "-", "notes"])
     assert isinstance(res.exception, _Exec), res.output
     assert _json.loads((oc / "opencode.json").read_text()) == {"model": "openai/gpt-5"}
+
+
+# --- multi-project sessions -------------------------------------------------
+
+def _wire_multi(monkeypatch, tmp_path, mem_repo, projects: dict):
+    """Like `_wire`, but with several projects keyed by manifest name.
+
+    `projects` maps name -> (repo_path, repository_url), so each gets its own
+    clone label (the repository's basename)."""
+    monkeypatch.setenv("KARAKUM_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("KARAKUM_CONFIG_DIR", str(tmp_path / "config"))
+
+    monkeypatch.setattr(cli.manifest, "agent_path", lambda a: f"AGENT:{a}")
+    monkeypatch.setattr(cli.manifest, "project_path", lambda p: f"PROJECT:{p}")
+
+    def load(path):
+        path = str(path)
+        if path.startswith("AGENT:"):
+            return {"memory": {"path": str(mem_repo), "repository": "https://example.com/mem.git"}}
+        if path.startswith("PROJECT:"):
+            repo_path, url = projects[path.removeprefix("PROJECT:")]
+            return {"path": str(repo_path), "repository": url}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(cli.manifest, "load", load)
+    monkeypatch.setattr(cli.manifest, "karakum_root", lambda: tmp_path)
+    monkeypatch.setattr(cli.preflight, "check_tools", lambda: None)
+    monkeypatch.setattr(cli.preflight, "check_repo", lambda *a, **k: None)
+    monkeypatch.setattr(cli.ksecrets, "load", lambda: ({}, []))
+    monkeypatch.setattr(cli.os, "chdir", lambda p: None)
+
+
+def _two_projects(monkeypatch, tmp_path):
+    mem = tmp_path / "src_mem"
+    a, b = tmp_path / "src_a", tmp_path / "src_b"
+    for r in (mem, a, b):
+        _mkrepo(r)
+    _wire_multi(monkeypatch, tmp_path, mem, {
+        "dewey": (a, "https://example.com/dewey.git"),
+        "mundaneum": (b, "https://example.com/mundaneum.git"),
+    })
+    return mem, a, b
+
+
+def test_several_projects_each_get_a_clone_on_the_agent_branch(monkeypatch, tmp_path):
+    """Every project clone shares `<agent>/<slug>` — they are one session's work."""
+    _two_projects(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.os, "execvpe", lambda *a, **k: (_ for _ in ()).throw(_Exec()))
+
+    res = CliRunner().invoke(cli.main, ["launch", "alice", "dewey,mundaneum", "init"])
+    assert isinstance(res.exception, _Exec), res.output
+
+    clones = _clones(tmp_path, "alice", "init")
+    assert clones == {
+        "scratchpad": "dewey+mundaneum/init",   # memory joins the projects it serves
+        "dewey.git": "alice/init",
+        "mundaneum.git": "alice/init",
+    }
+
+
+def test_memory_branch_does_not_depend_on_argument_order(monkeypatch, tmp_path):
+    """`b,a` must reuse `a+b/<slug>`, not open a second branch in the same clone."""
+    _two_projects(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.os, "execvpe", lambda *a, **k: (_ for _ in ()).throw(_Exec()))
+
+    res = CliRunner().invoke(cli.main, ["launch", "alice", "mundaneum,dewey", "init"])
+    assert isinstance(res.exception, _Exec), res.output
+    assert _clones(tmp_path, "alice", "init")["scratchpad"] == "dewey+mundaneum/init"
+
+
+def test_project_env_is_singular_first_and_plural_all(monkeypatch, tmp_path):
+    """KARAKUM_PROJECT keeps pointing at one path so existing docs/skills hold;
+    KARAKUM_PROJECTS carries the full colon-separated list."""
+    _two_projects(monkeypatch, tmp_path)
+    captured = _capture_exec(monkeypatch)
+
+    res = CliRunner().invoke(cli.main, ["launch", "alice", "dewey,mundaneum", "init"])
+    assert isinstance(res.exception, _Exec), res.output
+
+    argv = captured["argv"]
+    assert "KARAKUM_PROJECT=/home/agent/dewey.git" in argv
+    assert "KARAKUM_PROJECTS=/home/agent/dewey.git:/home/agent/mundaneum.git" in argv
+    # both clones are bind-mounted
+    mounts = [a for a in argv if str(a).endswith(":rw")]
+    assert sum("dewey.git" in m for m in mounts) == 1
+    assert sum("mundaneum.git" in m for m in mounts) == 1
+
+
+def test_single_project_still_sets_only_the_expected_env(monkeypatch, tmp_path):
+    """One project behaves exactly as before — branch and KARAKUM_PROJECT unchanged."""
+    _two_projects(monkeypatch, tmp_path)
+    captured = _capture_exec(monkeypatch)
+
+    res = CliRunner().invoke(cli.main, ["launch", "alice", "dewey", "init"])
+    assert isinstance(res.exception, _Exec), res.output
+
+    assert _clones(tmp_path, "alice", "init")["scratchpad"] == "dewey/init"
+    assert "KARAKUM_PROJECT=/home/agent/dewey.git" in captured["argv"]
+    assert "KARAKUM_PROJECTS=/home/agent/dewey.git" in captured["argv"]
+
+
+def test_colliding_repo_basenames_refuse_to_launch(monkeypatch, tmp_path):
+    """Two repos with the same basename would mount on one path and share a clone."""
+    mem = tmp_path / "src_mem"
+    a, b = tmp_path / "src_a", tmp_path / "src_b"
+    for r in (mem, a, b):
+        _mkrepo(r)
+    _wire_multi(monkeypatch, tmp_path, mem, {
+        "mine":   (a, "https://example.com/owner-a/tools.git"),
+        "theirs": (b, "https://example.com/owner-b/tools.git"),
+    })
+    monkeypatch.setattr(cli.os, "execvpe", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("must not reach docker")))
+
+    res = CliRunner().invoke(cli.main, ["launch", "alice", "mine,theirs", "init"])
+    assert res.exit_code == 2, res.output
+    # and it failed before creating any clone
+    assert not (tmp_path / "data" / "sessions" / "alice" / "init").exists()

@@ -3,9 +3,10 @@
 # Run `just` (no args) to list recipes.
 #
 # Schema:
-#   just shell <agent> <project> <slug>
-#   - agent provides identity (memory); project branch is <agent>/<slug>
-#   - project names a workspace repo to mount RW; memory branch is <project>/<slug>
+#   just shell <agent> <project[,project...]> <slug>
+#   - agent provides identity (memory); every project branch is <agent>/<slug>
+#   - project names one or more workspace repos to mount RW, comma-separated;
+#     memory branch is <project>/<slug>, or <a+b>/<slug> (sorted) for several
 #     ('-' for no project — memory-only session, memory branch is just <slug>)
 #   - slug names the work; '-' for no session clone (runs on main, with a warning)
 
@@ -32,6 +33,7 @@ smoke:
     bash tests/smoke.sh
 
 # Use '-' for <project> (memory-only) or <slug> (run on main branch).
+# Several projects: comma-separate them — just shell takwin dewey,mundaneum init
 # Drop into a session shell (in ~): just shell <agent> <project> <slug>
 # Then run whichever agent CLI you want: claude, codex, or opencode.
 shell agent project="-" slug="-":

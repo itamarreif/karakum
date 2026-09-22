@@ -128,3 +128,28 @@ def test_gh_env_none_when_secrets_have_no_token(monkeypatch):
     monkeypatch.delenv("GH_TOKEN", raising=False)
     monkeypatch.setattr(cli.ksecrets, "load", lambda: ({}, []))
     assert cli._gh_env() is None
+
+
+# --- _parse_projects / _memory_branch --------------------------------------
+
+@pytest.mark.parametrize("spec,expected", [
+    ("-", []),
+    ("", []),
+    ("dewey", ["dewey"]),
+    ("dewey,mundaneum", ["dewey", "mundaneum"]),
+    (" dewey , mundaneum ", ["dewey", "mundaneum"]),   # whitespace tolerated
+    ("dewey,dewey", ["dewey"]),                        # repeats collapse
+    ("dewey,,mundaneum", ["dewey", "mundaneum"]),      # empty segments dropped
+])
+def test_parse_projects(spec, expected):
+    assert cli._parse_projects(spec) == expected
+
+
+@pytest.mark.parametrize("projects,expected", [
+    ([], "init"),                                        # memory-only -> bare slug
+    (["dewey"], "dewey/init"),                           # unchanged from single-project
+    (["dewey", "mundaneum"], "dewey+mundaneum/init"),
+    (["mundaneum", "dewey"], "dewey+mundaneum/init"),    # sorted: order-independent
+])
+def test_memory_branch(projects, expected):
+    assert cli._memory_branch(projects, "init") == expected

@@ -216,15 +216,19 @@ cli.launch(agent, project, slug)   →   _do_launch(agent, project, slug)
 │        │     └─ git -C <session> checkout [-b] <memory_branch>
 │        └─ session_name = slug          # slug-only identity (no date); KARAKUM_SESSION
 │
-├─3 PROJECT (optional, only if project != "-")
-│   ├─ manifest.load(manifest.project_path(project))
-│   ├─ manifest.expand_path / manifest.get  (path, repository)
-│   ├─ preflight.check_repo(project_path, project_repo, "project '...'")
-│   ├─ project_session = project_path  (no_session)
-│   │                  |  ksession.ensure(project_path, agent, slug, "project", project_repo, "<agent>/<slug>")
-│   │                     → <sessions_root>/<agent>/<slug>/<project-name>  on branch <agent>/<slug>
-│   └─ project_mount = ~/<project-name>             # mount under container home, not host path
-│       project_args = ["-v", "<ps>:<pm>:rw", "-e", "KARAKUM_PROJECT=<pm>"]
+├─3 PROJECTS (zero or more; `-` for none, else a comma-separated list)
+│   ├─ _parse_projects(project)  → ["dewey", "mundaneum"]   # order kept, repeats collapse
+│   ├─ resolve ALL manifests first (before any clone exists):
+│   │     manifest.load / expand_path / get  (path, repository)
+│   │     label = ksession.clone_label("project", repository)
+│   │     two projects sharing a label → console.error + SystemExit(2)
+│   └─ for each: preflight.check_repo(...)
+│         project_session = project_path  (no_session)
+│                         |  ksession.ensure(project_path, agent, slug, "project", project_repo, "<agent>/<slug>")
+│                            → <sessions_root>/<agent>/<slug>/<project-name>  on branch <agent>/<slug>
+│         project_args += ["-v", "<ps>:~/<project-name>:rw"]
+│       then once: ["-e", "KARAKUM_PROJECT=<first mount>",
+│                   "-e", "KARAKUM_PROJECTS=<mount>:<mount>..."]
 │
 ├─4 SECRETS
 │   ├─ ksecrets.load()                        # reads host-wide <config_dir>/secrets.yaml
