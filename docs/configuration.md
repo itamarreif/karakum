@@ -23,7 +23,7 @@ pyproject.toml  docs/  README.md
 config.yaml              # global settings (sessions_root, state_root, cleanup)
 toolchains.yaml          # toolchain versions + components (seed from examples/)
 agents/<name>.yaml       # per-agent: memory repo path + canonical remote
-projects/<name>.yaml     # per-project: repo path + canonical remote
+projects/<name>.yaml     # per-project: one or more repos (path + canonical remote)
 secrets.yaml             # secret references only (op:// / env://), never values
 
 # DATA ($KARAKUM_DATA_DIR, default ~/.karakum) — large, regenerable, NOT in dotfiles
@@ -76,7 +76,7 @@ get deleted often and you want them easy to find and wipe — not buried under
 |------|---------|
 | `config.yaml` | Global settings: `sessions_root`, `state_root`. All keys optional — a missing file or key falls back to defaults (`config.py`). |
 | `agents/<name>.yaml` | An agent identity: `name`, `memory.path` (local memory repo), `memory.repository` (canonical remote; preflight verifies the local `origin` matches), and optional `memory.init` (a shell command run in-container after mounts land, from `$KARAKUM_MEMORY` — karakum runs it verbatim and stays framework-agnostic; e.g. link a vault's master prompt into each CLI's instruction file: `~/.claude/CLAUDE.md` (claude), `~/.config/opencode/AGENTS.md` (opencode), `~/.codex/AGENTS.md` (codex), `~/.pi/agent/AGENTS.md` (pi). Idempotent, non-fatal). Loaded by `manifest.load`. |
-| `projects/<name>.yaml` | A project the agent acts on: `name`, `path`, `repository`. Same preflight check. Optional `clean:` (a command or list) overrides toolchain autodetect for this project's clone in `session clean` — use it for monorepos with nested packages. |
+| `projects/<name>.yaml` | A project the agent acts on: `name` plus **one or more repos**. One repo is the shorthand `path` + `repository`; several go under `repos:` as a list of `{path, repository, clean}` (mutually exclusive with the shorthand). Same preflight check per repo. Optional `clean:` (a command or list) overrides toolchain autodetect for that repo's clone in `session clean` — use it for monorepos with nested packages. |
 | `secrets.yaml` | A `secrets:` map of env-var name → URI reference (`op://…`, `env://…`). References only — the launcher resolves each at session start and injects `-e VAR` (name only) into the container; values never touch argv or disk. See `secrets.py` for providers. |
 | `toolchains.yaml` | Toolchain versions + per-ecosystem tools and components (read by `karakum build`) plus a `detect`/`clean` command pair per toolchain (read by `session clean` to free build artifacts). Host-owned (config-dir-only, like agents/projects); seed it from `examples/toolchains.yaml`. |
 
@@ -84,7 +84,8 @@ Inside the **data dir**:
 
 - `sessions/<agent>/<slug>/<label>/` — one independent `git clone` per repo a
   session touches (`label` = `scratchpad` for the agent memory repo, else the
-  project name), on branch `<agent>/<slug>`. See `session.py` / `architecture.md`.
+  repo's basename — a project with several repos gets several), on branch
+  `<agent>/<slug>`. See `session.py` / `architecture.md`.
 - `state/<agent>/` — the persistent `~/.claude` for the Claude Code harness, one
   per agent: OAuth/auth session, `.claude.json` (project trust, allowed tools,
   onboarding flag), and caches. Bind-mounted to `/home/agent/.claude` so it

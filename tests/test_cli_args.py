@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from karakum import cli
+from karakum import cli, manifest
 
 
 def _fake_git_config(values: dict):
@@ -128,3 +128,66 @@ def test_gh_env_none_when_secrets_have_no_token(monkeypatch):
     monkeypatch.delenv("GH_TOKEN", raising=False)
     monkeypatch.setattr(cli.ksecrets, "load", lambda: ({}, []))
     assert cli._gh_env() is None
+
+
+# --- manifest.project_repos -------------------------------------------------
+
+def test_project_repos_shorthand_is_one_repo():
+    """The single-repo spelling is shorthand for a one-entry `repos:`."""
+    out = manifest.project_repos({"name": "x", "path": "~/a", "repository": "github.com/o/a"})
+    assert out == [{"path": "~/a", "repository": "github.com/o/a", "clean": None}]
+
+
+def test_project_repos_list_keeps_order_and_per_repo_clean():
+    out = manifest.project_repos({"name": "platform", "repos": [
+        {"path": "~/a", "repository": "github.com/o/a"},
+        {"path": "~/b", "repository": "github.com/o/b", "clean": ["cargo clean"]},
+    ]})
+    assert [r["path"] for r in out] == ["~/a", "~/b"]
+    assert out[1]["clean"] == ["cargo clean"]
+
+
+def test_project_repos_rejects_both_spellings():
+    """Merging them would mean guessing which wins; a half-finished edit should say so."""
+    with pytest.raises(SystemExit):
+        manifest.project_repos({"path": "~/a", "repos": [{"path": "~/b"}]}, "x")
+
+
+def test_project_repos_rejects_empty_and_non_list():
+    with pytest.raises(SystemExit):
+        manifest.project_repos({"repos": []}, "x")
+    with pytest.raises(SystemExit):
+        manifest.project_repos({"repos": "~/a"}, "x")
+    with pytest.raises(SystemExit):
+        manifest.project_repos({"repos": ["~/a"]}, "x")
+
+
+def test_project_repos_normalizes_shape_only():
+    """Missing fields come back as None — `resume` and the clean map read every
+    manifest on the host and must not die on an incomplete one."""
+    assert manifest.project_repos({"name": "x", "clean": "make clean"}) == [
+        {"path": None, "repository": None, "clean": "make clean"}]
+
+
+# --- `karakum projects` listing --------------------------------------------
+
+def test_projects_lists_one_row_per_repo(monkeypatch, tmp_path):
+    """A multi-repo project must not list with empty path/repository columns."""
+    from click.testing import CliRunner
+    pdir = tmp_path / "config" / "projects"
+    pdir.mkdir(parents=True)
+    (pdir / "web.yaml").write_text("name: web\npath: ~/code/web\nrepository: github.com/o/web\n")
+    (pdir / "platform.yaml").write_text(
+        "name: platform\nrepos:\n"
+        "  - {path: ~/code/dewey, repository: github.com/o/dewey}\n"
+        "  - {path: ~/code/mundaneum, repository: github.com/o/mundaneum}\n")
+    monkeypatch.setenv("KARAKUM_CONFIG_DIR", str(tmp_path / "config"))
+
+    res = CliRunner().invoke(cli.main, ["projects", "--plain"])
+    assert res.exit_code == 0, res.output
+    rows = [l.split("\t") for l in res.output.strip().splitlines()]
+    assert rows == [
+        ["platform", "~/code/dewey", "github.com/o/dewey"],
+        ["platform", "~/code/mundaneum", "github.com/o/mundaneum"],
+        ["web", "~/code/web", "github.com/o/web"],
+    ]

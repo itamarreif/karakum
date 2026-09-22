@@ -2,14 +2,22 @@
 # to <config-dir>/projects/<name>.yaml and edit, where <config-dir> is
 # $KARAKUM_CONFIG_DIR (default ~/.config/karakum).
 #
+# A project is one *or more* git repos. All of them mount together in a session,
+# each at ~/<repo-name>, each on the branch <agent>/<slug>.
+#
 # Schema:
 #   name        - identifier (matches the file basename)
-#   path        - local path to the project's git repo
-#   repository  - canonical remote; preflight verifies local origin matches
-#   clean       - (optional) commands `karakum session clean` runs for this
-#                 project's clone instead of toolchain autodetect. Use this for
-#                 monorepos / nested packages autodetect (root-only) can't reach.
-#                 Each runs from the clone root, tolerant of failure.
+#   path        - local path to the repo          \ shorthand for a
+#   repository  - canonical remote                / single-repo project
+#   repos       - list of {path, repository, clean} for a multi-repo project;
+#                 mutually exclusive with the top-level path/repository above
+#   clean       - (optional) commands `karakum session clean` runs for that repo's
+#                 clone instead of toolchain autodetect. Use it for monorepos /
+#                 nested packages autodetect (root-only) can't reach. Each runs
+#                 from the clone root, tolerant of failure. Per *repo*, so a
+#                 multi-repo project puts it inside the `repos:` entry.
+#
+# preflight verifies each local repo's origin matches its `repository`.
 
 name: example
 path: ~/code/you/your-repo
@@ -19,3 +27,19 @@ repository: github.com/you/your-repo
 # clean:
 #   - cargo clean
 #   - cd webapp && npm run clean --if-present && rm -rf node_modules .next
+
+# --- multi-repo form -------------------------------------------------------
+# A project whose work spans several repos — they mount side by side in one
+# session, so a change touching both is one session and one branch name:
+#
+# name: platform
+# repos:
+#   - path: ~/code/ai/dewey
+#     repository: github.com/you/dewey
+#   - path: ~/code/ai/mundaneum
+#     repository: github.com/you/mundaneum
+#     clean:
+#       - rm -rf .venv
+#
+# Two repos whose names share a basename can't be in one project — both would
+# mount at ~/<name> and share a clone. The launcher refuses before cloning.

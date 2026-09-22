@@ -14,10 +14,17 @@ from click.testing import CliRunner
 from karakum import cli
 
 
-def _sess(agent, slug, labels):
+def _sess(agent, slug, labels, mem_branch=None):
+    """A fake session. `mem_branch` is the scratchpad clone's branch — the launcher
+    writes `<project>/<slug>` (or a bare `<slug>`) there, and resume reads it back.
+    Pass None to simulate a clone whose branch can't be read, forcing the fallback."""
+    def branch_for(label):
+        if label != "scratchpad":
+            return f"{agent}/{slug}"
+        return mem_branch if mem_branch is not None else ""
     return SimpleNamespace(
         agent=agent, slug=slug, path=Path(f"/s/{agent}/{slug}"),
-        clones=[SimpleNamespace(label=l) for l in labels],
+        clones=[SimpleNamespace(label=l, branch=branch_for(l)) for l in labels],
     )
 
 
@@ -68,7 +75,7 @@ def test_resolve_no_match(monkeypatch):
 # --- resume -----------------------------------------------------------------
 
 def test_resume_memory_only(monkeypatch):
-    _patch_sessions(monkeypatch, [_sess("alice", "notes", ["scratchpad"])])
+    _patch_sessions(monkeypatch, [_sess("alice", "notes", ["scratchpad"], mem_branch="notes")])
     calls = _capture_launch(monkeypatch)
     res = CliRunner().invoke(cli.main, ["resume", "notes"])
     assert res.exit_code == 0, _text(res)
@@ -76,26 +83,67 @@ def test_resume_memory_only(monkeypatch):
     assert calls[0] == ("alice", "-", "notes")
 
 
-def test_resume_with_project_maps_label_to_name(monkeypatch):
-    _patch_sessions(monkeypatch, [_sess("alice", "fix-login", ["scratchpad", "webapp"])])
-    monkeypatch.setattr(cli, "_project_for_label", lambda label: "web" if label == "webapp" else None)
+def test_resume_reads_the_project_off_the_memory_branch(monkeypatch):
+    """The launcher recorded `<project>/<slug>` there, so no label lookup is needed."""
+    _patch_sessions(monkeypatch, [_sess("alice", "fix-login", ["scratchpad", "webapp"],
+                                        mem_branch="web/fix-login")])
+    monkeypatch.setattr(cli, "_project_for_label",
+                        lambda label: (_ for _ in ()).throw(AssertionError("should not be consulted")))
     calls = _capture_launch(monkeypatch)
     res = CliRunner().invoke(cli.main, ["resume", "fix-login"])
     assert res.exit_code == 0, _text(res)
     assert calls[0] == ("alice", "web", "fix-login")
 
 
-def test_resume_multiple_projects_errors(monkeypatch):
-    _patch_sessions(monkeypatch, [_sess("alice", "big", ["scratchpad", "webapp", "api"])])
+def test_resume_multi_repo_project_reopens_from_one_name(monkeypatch):
+    """One name reopens every repo the project declares."""
+    _patch_sessions(monkeypatch, [_sess("alice", "big", ["scratchpad", "dewey", "mundaneum"],
+                                        mem_branch="platform/big")])
+    calls = _capture_launch(monkeypatch)
+    res = CliRunner().invoke(cli.main, ["resume", "big"])
+    assert res.exit_code == 0, _text(res)
+    assert calls[0] == ("alice", "platform", "big")
+
+
+def test_resume_prefers_the_branch_over_an_ambiguous_label(monkeypatch):
+    """If two manifests declare the same repo — not intended, but reachable
+    mid-migration — the label alone can't tell them apart. The memory branch can:
+    it is what the session was actually launched with."""
+    _patch_sessions(monkeypatch, [_sess("alice", "w", ["scratchpad", "dewey"],
+                                        mem_branch="dewey/w")])
+    monkeypatch.setattr(cli, "_project_for_label", lambda label: "ai")  # the wrong answer
+    calls = _capture_launch(monkeypatch)
+    res = CliRunner().invoke(cli.main, ["resume", "w"])
+    assert res.exit_code == 0, _text(res)
+    assert calls[0] == ("alice", "dewey", "w")
+
+
+def test_resume_errors_when_clones_span_two_projects(monkeypatch):
+    """One project per session — a session holding two predates that or was hand-made."""
+    _patch_sessions(monkeypatch, [_sess("alice", "big", ["scratchpad", "webapp", "api"])])  # no mem branch -> fallback
+    monkeypatch.setattr(cli, "_project_for_label",
+                        lambda label: {"webapp": "web", "api": "svc"}.get(label))
     calls = _capture_launch(monkeypatch)
     res = CliRunner().invoke(cli.main, ["resume", "big"])
     assert res.exit_code != 0
-    assert "multiple projects" in _text(res)
-    assert calls == []  # never launched
+    assert "more than one project" in _text(res)
+    assert calls == []
+
+
+def test_resume_errors_when_one_of_several_labels_is_unmappable(monkeypatch):
+    """One unknown clone still fails the whole resume — a partial reopen would
+    silently drop a repo the session was working on."""
+    _patch_sessions(monkeypatch, [_sess("alice", "big", ["scratchpad", "webapp", "ghost"])])  # no mem branch -> fallback
+    monkeypatch.setattr(cli, "_project_for_label", lambda label: "web" if label == "webapp" else None)
+    calls = _capture_launch(monkeypatch)
+    res = CliRunner().invoke(cli.main, ["resume", "big"])
+    assert res.exit_code != 0
+    assert "ghost" in _text(res)
+    assert calls == []
 
 
 def test_resume_unmappable_label_errors(monkeypatch):
-    _patch_sessions(monkeypatch, [_sess("alice", "x", ["scratchpad", "ghost"])])
+    _patch_sessions(monkeypatch, [_sess("alice", "x", ["scratchpad", "ghost"])])  # no mem branch -> fallback
     monkeypatch.setattr(cli, "_project_for_label", lambda label: None)
     calls = _capture_launch(monkeypatch)
     res = CliRunner().invoke(cli.main, ["resume", "x"])
