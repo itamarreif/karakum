@@ -455,16 +455,20 @@ def agents(plain):
 @main.command("projects")
 @click.option("--plain", is_flag=True, default=None, help="Force plain TSV output.")
 def projects(plain):
-    """List configured projects."""
+    """List configured projects, one row per repo.
+
+    A project may declare several repos and a session mounts all of them, so the
+    listing is per repo rather than per project — the name repeats, which keeps
+    every row self-describing in the machine (TSV) mode.
+    """
     projects_dir = manifest.config_dir() / "projects"
     rows = []
     if projects_dir.exists():
         for path in sorted(projects_dir.glob("*.yaml")):
             data = manifest.load(path)
             name = manifest.get(data, "name") or path.stem
-            proj_path = manifest.get(data, "path") or ""
-            repo = manifest.get(data, "repository") or ""
-            rows.append((name, proj_path, repo))
+            for entry in manifest.project_repos(data, path.stem):
+                rows.append((name, entry["path"] or "", entry["repository"] or ""))
     console.render_table(["name", "path", "repository"], rows, plain=plain)
 
 

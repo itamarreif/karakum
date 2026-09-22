@@ -167,3 +167,27 @@ def test_project_repos_normalizes_shape_only():
     manifest on the host and must not die on an incomplete one."""
     assert manifest.project_repos({"name": "x", "clean": "make clean"}) == [
         {"path": None, "repository": None, "clean": "make clean"}]
+
+
+# --- `karakum projects` listing --------------------------------------------
+
+def test_projects_lists_one_row_per_repo(monkeypatch, tmp_path):
+    """A multi-repo project must not list with empty path/repository columns."""
+    from click.testing import CliRunner
+    pdir = tmp_path / "config" / "projects"
+    pdir.mkdir(parents=True)
+    (pdir / "web.yaml").write_text("name: web\npath: ~/code/web\nrepository: github.com/o/web\n")
+    (pdir / "platform.yaml").write_text(
+        "name: platform\nrepos:\n"
+        "  - {path: ~/code/dewey, repository: github.com/o/dewey}\n"
+        "  - {path: ~/code/mundaneum, repository: github.com/o/mundaneum}\n")
+    monkeypatch.setenv("KARAKUM_CONFIG_DIR", str(tmp_path / "config"))
+
+    res = CliRunner().invoke(cli.main, ["projects", "--plain"])
+    assert res.exit_code == 0, res.output
+    rows = [l.split("\t") for l in res.output.strip().splitlines()]
+    assert rows == [
+        ["platform", "~/code/dewey", "github.com/o/dewey"],
+        ["platform", "~/code/mundaneum", "github.com/o/mundaneum"],
+        ["web", "~/code/web", "github.com/o/web"],
+    ]
