@@ -71,7 +71,7 @@ Orchestration logic lives in the Python package (`karakum/`) — including Docke
 
 ## Conventions specific to karakum
 
-- Mount paths inside the container mirror host paths exactly.
+- **Mount paths inside the container never reveal host paths** — the inverse of what this line used to claim. Nothing is mounted at its host path: session clones land at `~/<agent>` and `~/<repo-name>` (`CONTAINER_HOME` in `cli.py`), per-CLI state at `~/.claude` / `~/.config/opencode` / `~/.codex` / `~/.pi`, the forwarded SSH agent at `/ssh-agent.sock`. The container is given no way to learn where any of it lives on the host.
 - Session clones (memory + project) are bind-mounted at runtime; the host repos' `.git` is never mounted, so a session can't reach the host's branches/refs/config.
 - New agent CLI = add it to `containers/agent/Dockerfile` (on `PATH`) + persist its state dir in `_do_launch` + mount it in `docker-compose.yaml`. No new service/recipe — it's one image.
 - New build toolchain = new `containers/toolchain-<name>/Dockerfile` + entry in `toolchains.yaml` + COPY into `containers/agent/Dockerfile` + build step in `cli.build`.
