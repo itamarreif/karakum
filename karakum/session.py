@@ -4,6 +4,33 @@ from pathlib import Path
 from karakum import config, console
 
 
+def current_branch(path: Path) -> str | None:
+    """The branch a clone is actually on, or None if it can't be read.
+
+    None covers a detached HEAD, a dir that isn't a repo, and git failing — every
+    caller has its own fallback for that, so this reports rather than guesses.
+    """
+    r = subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        return None
+    return r.stdout.strip() or None
+
+
+def clone_label(role: str, repo_label: str) -> str:
+    """The clone's directory name inside a session, and its mount basename.
+
+    `scratchpad` for the agent memory repo; otherwise the repository's last path
+    segment, so the name doesn't depend on where the repo happens to be checked
+    out on the host. Callers need this rule before `ensure` runs — a session
+    mounting several projects has to detect two repositories sharing a basename
+    *before* creating clones, since they would land on the same path.
+    """
+    return "scratchpad" if role == "agent" else repo_label.rstrip("/").split("/")[-1]
+
+
 def ensure(repo: Path, agent: str, slug: str, role: str, repo_label: str, branch: str) -> Path:
     """Create (or reuse) an isolated clone of `repo` for this session.
 
@@ -27,20 +54,34 @@ def ensure(repo: Path, agent: str, slug: str, role: str, repo_label: str, branch
 
     `role` ("agent" or "project") and `repo_label` (the manifest's canonical
     `repository`, e.g. `github.com/owner/repo`) label log output — a session
-    spans one clone per repo, so the two lines otherwise look like a duplicate.
+    spans one clone per repo and may mount several projects, so the lines
+    otherwise look like duplicates.
     `repo_label` is used instead of the local directory name so the line doesn't
     depend on where the repo happens to be checked out.
     """
     repo = Path(repo).resolve()
-    label = "scratchpad" if role == "agent" else repo_label.rstrip("/").split("/")[-1]
-    session = config.sessions_root() / agent / slug / label
+    session = config.sessions_root() / agent / slug / clone_label(role, repo_label)
 
     if session.exists():
         # Reuse only a real karakum clone (`.git` is a directory). A `.git` *file*
         # (a git worktree) or anything else means the path wasn't created by
         # karakum — fail loudly rather than mount an unusable dir.
         if (session / ".git").is_dir():
-            console.info(f"reusing {role} session: {repo_label} @ {branch}")
+            # Reuse is deliberately non-destructive: an existing clone is left on
+            # whatever branch it is on, and is NOT switched to `branch`. So report
+            # what is actually checked out, not what was asked for — they diverge
+            # when a project is renamed, or when someone checked out another branch
+            # inside the clone mid-session.
+            actual = current_branch(session)
+            if actual and actual != branch:
+                console.warn(
+                    f"reusing {role} session: {repo_label} @ {actual} "
+                    f"— NOT {branch}, which this launch asked for. The clone already "
+                    "existed and reuse never switches branches; check it out yourself "
+                    "if that is what you meant."
+                )
+            else:
+                console.info(f"reusing {role} session: {repo_label} @ {actual or branch}")
             return session
         console.error(
             f"{session} exists but is not a karakum clone (no .git directory) — "

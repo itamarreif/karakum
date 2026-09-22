@@ -12,7 +12,7 @@ karakum decouples:
    `opencode`, and `pi` on `PATH`; pick one inside the session shell. (The image's build
    toolchains — node/python/rust/proto — come from `toolchains.yaml`.)
 2. **Agent** (identity: memory) — `<config-dir>/agents/<name>.yaml`. Decoupled from CLI and project.
-3. **Project** (workspace the agent acts on) — `<config-dir>/projects/<name>.yaml`. Optional per session.
+3. **Project** (workspace the agent acts on) — `<config-dir>/projects/<name>.yaml`. Optional per session; declares **one or more repos**, all mounted together.
 
 ```
 just shell <agent> <project> <slug>  # drops you in a shell in ~; then run claude / codex / opencode / pi
@@ -122,7 +122,7 @@ uv tool install --editable .                         # editable install — stil
 just build                                           # build base + toolchain + agent image (~5-10 min)
 claude setup-token                                   # one-time (host): OAuth token → CLAUDE_CODE_OAUTH_TOKEN in secrets.yaml (or use ANTHROPIC_API_KEY)
 just shell <agent> - <slug>                          # memory-only session (note-taking, organizing, etc.)
-just shell <agent> <project> <slug>                  # session that also has <project> mounted RW
+just shell <agent> <project> <slug>                  # session with <project>'s repos mounted RW
 just shell <agent> - -                               # no slug: run on main branch (shows disclaimer)
 just resume <slug>                                   # reopen an existing session by slug (agent + project recovered from disk)
 ```
@@ -141,13 +141,17 @@ checkout, so `karakum_root()` still resolves to the repo where
 `docker-compose.yaml` and `containers/` live — `just build` and Dockerfile edits
 keep working. Recommended for a personal, single-machine install.
 
-`<slug>` names what the session is about. The launcher creates (or reuses) an **isolated clone** at `<sessions_root>/<agent>/<slug>/<label>` for **both** the memory repo (`label` = `scratchpad`) and the project repo (`label` = the project name), if specified. The two clones sit together under `<agent>/<slug>` but check out **differently namespaced branches**: the project clone is on `<agent>/<slug>` (whose changes are the agent's), while the memory clone is on `<project>/<slug>` — so a memory repo shared across projects keeps each project's session work on its own branch. (With no project, the memory branch is just `<slug>`.) Grouping by session keeps every repo a session touches together, and living outside the repos means it never collides with a manual `git worktree add`. Each clone is fully independent (its own `.git`, no shared objects), so the agent can never touch the host repo's git database; its `origin` points at GitHub, so commits reach the host via push + pull/PR, not a shared `.git`. The slug is the stable session identity — resuming the same slug (even on a later day) reuses the same clone and branch. Omitting the slug (`-`) skips cloning and mounts the live main branch directly — a warning is printed since changes affect the repo immediately.
+`<slug>` names what the session is about. The launcher creates (or reuses) an **isolated clone** at `<sessions_root>/<agent>/<slug>/<label>` for **both** the memory repo (`label` = `scratchpad`) and the project repo (`label` = the project name), if specified. The clones sit together under `<agent>/<slug>` but check out **differently namespaced branches**: every repo clone is on `<agent>/<slug>` (whose changes are the agent's), while the memory clone is on `<project>/<slug>` — so a memory repo shared across projects keeps each project's session work on its own branch. One project per session, so that name is unambiguous however many repos the project holds. (With no project, the memory branch is just `<slug>`.) Grouping by session keeps every repo a session touches together, and living outside the repos means it never collides with a manual `git worktree add`. Each clone is fully independent (its own `.git`, no shared objects), so the agent can never touch the host repo's git database; its `origin` points at GitHub, so commits reach the host via push + pull/PR, not a shared `.git`. The slug is the stable session identity — resuming the same slug (even on a later day) reuses the same clone and branch.
+
+**Reuse never switches branches.** An existing clone is left on whatever branch it is on — so if a clone's branch and the one this launch derived disagree (a renamed project, a hand-checkout mid-session), the clone wins. The launcher warns and names both; check out the other branch yourself if that is what you meant.
+
+**Two repos in one project can't share a basename** — both would land on `~/<name>` and share one clone. The launcher refuses, before creating anything. Omitting the slug (`-`) skips cloning and mounts the live main branch directly — a warning is printed since changes affect the repo immediately.
 
 > `<sessions_root>` defaults to `<data_dir>/sessions` (`$KARAKUM_DATA_DIR`, default `~/.karakum`). Override it by setting `sessions_root` in `<config-dir>/config.yaml`, or relocate the whole data dir with `$KARAKUM_DATA_DIR`. Because clones live there (not inside the repos), no per-repo `.gitignore` entry is needed.
 
 Multiple terminals can open the **same slug** concurrently; each gets a unique container name so Docker doesn't conflict.
 
-To **reopen** an existing session without retyping its agent and project, use `just resume <slug>`: it finds the session's clones on disk, recovers the agent and project from them, and drops you back into the same branches. If the slug exists under more than one agent it lists them and errors — qualify it as `just resume <agent>/<slug>`, or fall back to the explicit `just shell <agent> <project> <slug>` (which also lets you pick a project when a session spans several). `just shell …` stays the way to **create** a session.
+To **reopen** an existing session without retyping its agent and project, use `just resume <slug>`: it finds the session's clones on disk, recovers the agent and project from them, and drops you back into the same branches. A project's repos all map back to the one project, so a multi-repo session reopens from a single name. If the slug exists under more than one agent it lists them and errors — qualify it as `just resume <agent>/<slug>`, or fall back to the explicit `just shell <agent> <project> <slug>`. `just shell …` stays the way to **create** a session.
 
 `just` (no args) lists all recipes; `just agents` lists configured agents; `just projects` lists configured projects.
 
@@ -170,7 +174,7 @@ alice   scratchpad  fix-login   no-pr     webapp/fix-login*
 alice   webapp      fix-login   #12       alice/fix-login↑2
 ```
 
-The branch column folds in dirty (`*`) and unpushed (`↑N`) state; note the two clones of a session carry differently namespaced branches (memory on `<project>/<slug>`, project on `<agent>/<slug>`). The pr-state column queries GitHub with `gh api repos/{owner}/{repo}/pulls` (`#N` for an open PR, else `merged`/`closed`, `no-pr` if none). It authenticates with the `GH_TOKEN` resolved from `secrets.yaml` — the same source `just shell` uses — so it works on the host even when your interactive `gh` is a shell-function wrapper; an already-exported `GH_TOKEN` is reused as-is. Without `gh` on PATH, or when the token is missing/rejected, the cell shows `?` and a stderr line names the repo + reason.
+The branch column folds in dirty (`*`) and unpushed (`↑N`) state; note a session's clones carry differently namespaced branches (memory on `<project>/<slug>`, every repo on `<agent>/<slug>`). The pr-state column queries GitHub with `gh api repos/{owner}/{repo}/pulls` (`#N` for an open PR, else `merged`/`closed`, `no-pr` if none). It authenticates with the `GH_TOKEN` resolved from `secrets.yaml` — the same source `just shell` uses — so it works on the host even when your interactive `gh` is a shell-function wrapper; an already-exported `GH_TOKEN` is reused as-is. Without `gh` on PATH, or when the token is missing/rejected, the cell shows `?` and a stderr line names the repo + reason.
 
 `just session-rm <slug>` (alias: `karakum session rm <slug>`) deletes the entire session directory and reaps any exited `agent-<agent>-<slug>-*` containers. If the slug exists under multiple agents it lists them and errors; qualify it as `<agent>/<slug>` to pick one. (Same for `session-clean` / `session-down` / `resume` — they share one resolver.)
 
@@ -192,12 +196,12 @@ karakum shell alice webapp try-the-mvp
 Session clones mount **under the container home (`~`)**, never at their host paths, so the container is unaware of the external filesystem and the prompt stays clean (`alice:~ $`). The host path the clone lives at is an implementation detail the agent never sees.
 
 - **Memory session clone** (the vault) at host `<sessions_root>/<agent>/<slug>/scratchpad/`, mounted **RW** at `~/<agent>` — the clone *is* the vault root, so a vault's own `scratchpad/` lands at `~/<agent>/scratchpad`, not `~/scratchpad/scratchpad`.
-- **Project session clone** (if a project is specified) at host `<sessions_root>/<agent>/<slug>/<project>/`, mounted **RW** at `~/<project>` (the repo name).
-- **CWD** inside the container = `~` (home); the memory clone and project sit as siblings under it.
+- **Project session clones** — one per repo the project declares, at host `<sessions_root>/<agent>/<slug>/<repo>/`, each mounted **RW** at `~/<repo>` (the repo name).
+- **CWD** inside the container = `~` (home); the memory clone and every repo sit as siblings under it.
 - **User**: the baked `agent` account is renamed at runtime to the launching agent (e.g. `alice`) by the image entrypoint, so `whoami`/`\u`/new-file ownership read the agent name. Home stays `/home/agent`.
 - **Per-CLI state** is bind-mounted from per-agent host dirs under `<state_root>` (default `<data_dir>/state`, i.e. `~/.karakum/state`), so each CLI's settings/auth/trust/history persist across runs and stay host-owned (agent-writable, inspectable): `claude` → `~/.claude` (`<state_root>/<agent>`); `opencode` → `~/.config/opencode` + `~/.local/share/opencode`; `codex` → `~/.codex`; `pi` → `~/.pi` (config + sessions under `~/.pi/agent`; auth is env-injected, so no `auth.json` is written unless you run interactive `/login`). opencode's config is seeded once with a default model so it skips the first-run picker; pi is not seeded — you pick a model with `/model` and pi persists it in the mount.
 - **Setup hook** (optional): an agent's `memory.init` command runs in-container after the mounts land (see [configuration](docs/configuration.md)) — e.g. to link the memory framework's master prompt into each CLI's instruction file (`~/.claude/CLAUDE.md`, `~/.config/opencode/AGENTS.md`, `~/.codex/AGENTS.md`, `~/.pi/agent/AGENTS.md`).
-- **Env vars**: `KARAKUM_MEMORY` (`~/<agent>`), `KARAKUM_PROJECT` (`~/<project>`, when set), `KARAKUM_SESSION`, `KARAKUM_AGENT`.
+- **Env vars**: `KARAKUM_MEMORY` (`~/<agent>`), `KARAKUM_PROJECT` (`~/<repo>` — the project's **first** repo, when set), `KARAKUM_PROJECTS` (every repo, colon-separated like `PATH`), `KARAKUM_SESSION`, `KARAKUM_AGENT`.
 
 The agent sees **only** its memory clone and (if specified) project clone — nothing else from the broader filesystem. Crucially, the **host repos' `.git` directories are never mounted**: each session is a standalone clone, so the agent cannot read or rewrite the host's branches, refs, config, or hooks. Both source repos must be git repos with `origin` remotes matching the manifest's `repository` field; the launcher fails loudly otherwise, and repoints each clone's `origin` at that remote so the agent pushes to GitHub.
 

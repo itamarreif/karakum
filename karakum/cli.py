@@ -146,19 +146,27 @@ def main():
 @click.argument("project")
 @click.argument("slug")
 def launch(agent, project, slug):
-    """Drop into a session shell (in ~); run claude/codex/opencode/pi from there."""
+    """Drop into a session shell (in ~); run claude/codex/opencode/pi from there.
+
+    PROJECT is one manifest name (which may itself declare several repos), or `-`
+    for a memory-only session.
+    """
     _do_launch(agent, project, slug)
 
 
 def _do_launch(agent, project, slug):
     """Host-side prep + exec of a session container (shared by `launch`/`resume`).
 
-    Ensures the memory clone (branch `<project>/<slug>`, or a bare `<slug>` with no
-    project) and, if given, the project clone (branch `<agent>/<slug>`), wires up
-    secrets / git identity / per-CLI state, then execs `docker compose run` into a
-    shell. There is one agent image carrying claude/codex/opencode/pi; the user runs
-    whichever CLI they want once inside. Existing clones are reused in place, so
-    this doubles as the `resume` path.
+    Ensures the memory clone and one clone per repo the project declares (`-` for
+    a memory-only session), wires up secrets / git identity / per-CLI state, then
+    execs `docker compose run` into a shell. There is one agent image carrying
+    claude/codex/opencode/pi; the user runs whichever CLI they want once inside.
+    Existing clones are reused in place, so this doubles as the `resume` path.
+
+    A project is one *or more* repos (`manifest.project_repos`), so a `platform`
+    project mounts dewey and mundaneum together. Branches stay namespaced per
+    role: every repo clone is on `<agent>/<slug>`, the memory clone on
+    `<project>/<slug>` — one project per session, so that name is unambiguous.
     """
     cmd = "bash"
     preflight.check_tools()
@@ -166,9 +174,35 @@ def _do_launch(agent, project, slug):
     no_session = slug in ("-", "")
     has_project = project not in ("-", "")
 
+    # --- resolve the project's repos before touching disk ---
+    # There is no point cloning the memory repo before finding out the project
+    # manifest is malformed, so every repo is resolved and checked up front.
+    resolved = []
+    if has_project:
+        proj_data = manifest.load(manifest.project_path(project))
+        for entry in manifest.project_repos(proj_data, project):
+            if not entry["path"]:
+                console.error(
+                    f"project '{project}': every repo needs a `path` "
+                    "(top-level for a one-repo project, or per entry under `repos:`)"
+                )
+                raise SystemExit(2)
+            repo_path = manifest.expand_path(entry["path"])
+            repo_url = entry["repository"]
+            label = repo_path.name if no_session else ksession.clone_label("project", repo_url or str(repo_path))
+            resolved.append((repo_path, repo_url, label))
+
+        labels = [r[2] for r in resolved]
+        if collisions := sorted({l for l in labels if labels.count(l) > 1}):
+            console.error(
+                f"project '{project}' declares repos sharing a mount name "
+                f"({', '.join(collisions)}): both would land on the same "
+                f"{CONTAINER_HOME}/<name> and share one session clone."
+            )
+            raise SystemExit(2)
+
     # --- memory (always present) ---
-    # The memory branch is namespaced by the project it serves (<project>/<slug>),
-    # falling back to a bare <slug> for a memory-only session (no project).
+    # Branch naming lives in _memory_branch.
     agent_data = manifest.load(manifest.agent_path(agent))
     memory_path = manifest.expand_path(manifest.get(agent_data, "memory.path"))
     memory_repo = manifest.get(agent_data, "memory.repository")
@@ -185,25 +219,32 @@ def _do_launch(agent, project, slug):
         session_name = "main"
     else:
         memory_branch = f"{project}/{slug}" if has_project else slug
-        memory_session = ksession.ensure(memory_path, agent, slug, "agent", memory_repo, memory_branch)
+        memory_session = ksession.ensure(
+            memory_path, agent, slug, "agent", memory_repo, memory_branch)
         session_name = slug
 
-    # --- project (optional) ---
-    # Mounts the project clone at ~/<repo-name>; the agent always lands in ~
-    # itself (see -w below), with the memory clone (~/<agent>) + project as
-    # siblings under it. The project branch is namespaced by the agent (<agent>/<slug>).
+    # --- the project's repos (optional) ---
+    # Each repo clone mounts at ~/<repo-name>; the agent always lands in ~ itself
+    # (see -w below), with the memory clone (~/<agent>) and every repo as siblings
+    # under it. Every repo branch is namespaced by the agent (<agent>/<slug>) —
+    # they share it, because they are one session's work on one project.
     project_args: list = []
-    if has_project:
-        proj_data = manifest.load(manifest.project_path(project))
-        project_path_ = manifest.expand_path(manifest.get(proj_data, "path"))
-        project_repo = manifest.get(proj_data, "repository")
-        preflight.check_repo(project_path_, project_repo, f"project '{project}'")
+    project_mounts: list[str] = []
+    for repo_path, repo_url, label in resolved:
+        preflight.check_repo(repo_path, repo_url, f"project '{project}' repo '{label}'")
+        repo_session = repo_path if no_session else ksession.ensure(
+            repo_path, agent, slug, "project", repo_url or str(repo_path), f"{agent}/{slug}")
+        mount = f"{CONTAINER_HOME}/{label}"
+        project_mounts.append(mount)
+        project_args += ["-v", f"{repo_session}:{mount}:rw"]
 
-        project_session = project_path_ if no_session else ksession.ensure(project_path_, agent, slug, "project", project_repo, f"{agent}/{slug}")
-        project_mount = f"{CONTAINER_HOME}/{Path(project_session).name}"
-        project_args = [
-            "-v", f"{project_session}:{project_mount}:rw",
-            "-e", f"KARAKUM_PROJECT={project_mount}",
+    if project_mounts:
+        # KARAKUM_PROJECT stays singular and points at the project's first repo, so
+        # everything written against a one-repo project keeps working.
+        # KARAKUM_PROJECTS carries all of them, colon-separated like PATH.
+        project_args += [
+            "-e", f"KARAKUM_PROJECT={project_mounts[0]}",
+            "-e", f"KARAKUM_PROJECTS={':'.join(project_mounts)}",
         ]
 
     # --- secrets ---
@@ -318,18 +359,77 @@ def _do_launch(agent, project, slug):
 def _project_for_label(label: str) -> "str | None":
     """Map a session clone label (a repo basename) back to a project manifest name.
 
-    `session.ensure` labels a project clone by its repository's last path segment;
-    this reverses that through the projects manifests so `resume` can hand a name
-    back to the launch path. Returns None if no manifest's repository matches.
+    `session.ensure` labels a clone by its repository's last path segment; this
+    reverses that through the projects manifests so `resume` can hand a name back
+    to the launch path. A project may declare several repos, so *any* of them
+    matching identifies the project. Returns None if none does — a stale or
+    renamed manifest, which `resume` reports rather than guessing around.
     """
     projects_dir = manifest.config_dir() / "projects"
     if not projects_dir.is_dir():
         return None
     for path in sorted(projects_dir.glob("*.yaml")):
-        repo = (manifest.get(manifest.load(path), "repository") or "").rstrip("/")
-        if repo and repo.split("/")[-1] == label:
-            return path.stem
+        for entry in manifest.project_repos(manifest.load(path), path.stem):
+            repo = (entry["repository"] or "").rstrip("/")
+            if repo and repo.split("/")[-1] == label:
+                return path.stem
     return None
+
+
+def _project_from_memory_branch(session) -> "str | None":
+    """Recover the project name from the memory clone's branch.
+
+    The launcher already *records* it there — the memory branch is
+    `<project>/<slug>`, or a bare `<slug>` with no project — so resume reads the
+    name instead of inferring it, which is simply the more direct route.
+
+    It is also the only reliable one. Reversing a clone label means searching the
+    manifests for a repo, and the same repo can appear in more than one of them —
+    not an intended configuration, but it happens mid-migration, and the label is
+    identical either way. Reading the branch cannot pick the wrong project.
+
+    Returns "-" for a memory-only session, the project name when the branch has
+    the expected shape, or None when it does not — a hand-checked-out branch, or
+    a clone whose branch could not be read — leaving the caller to fall back.
+    """
+    mem = next((c for c in session.clones if c.label == "scratchpad"), None)
+    if mem is None or not mem.branch:
+        return None
+    if mem.branch == session.slug:
+        return "-"
+    suffix = f"/{session.slug}"
+    if mem.branch.endswith(suffix):
+        return mem.branch[: -len(suffix)] or None
+    return None
+
+
+def _project_from_clone_labels(session) -> str:
+    """Fallback: map the session's clone labels back to a project manifest.
+
+    Only used when the branch does not carry the answer — chiefly sessions created
+    before it was read back. It searches the manifests for a repo, so it can land
+    on the wrong project if two declare the same one; it raises rather than
+    guessing when it cannot decide at all.
+    """
+    proj_labels = sorted(c.label for c in session.clones if c.label != "scratchpad")
+    if not proj_labels:
+        return "-"
+
+    names = {_project_for_label(label) for label in proj_labels}
+    if None in names:
+        unmapped = sorted(l for l in proj_labels if _project_for_label(l) is None)
+        raise click.ClickException(
+            f"can't map clone(s) {', '.join(unmapped)} back to a project manifest; "
+            f"reopen explicitly with 'just shell {session.agent} <project> {session.slug}'."
+        )
+    if len(names) > 1:
+        raise click.ClickException(
+            f"session {session.agent}/{session.slug} holds clones from more than one project "
+            f"({', '.join(sorted(names))}) — karakum mounts one project per session, so this "
+            "session predates that or was assembled by hand. Reopen explicitly with "
+            f"'just shell {session.agent} <project> {session.slug}'."
+        )
+    return names.pop()
 
 
 @main.command("resume")
@@ -338,30 +438,16 @@ def resume(spec):
     """Reopen an existing session: `karakum resume <slug>` (or `<agent>/<slug>`).
 
     Resolves the session on disk — erroring if a bare slug exists under multiple
-    agents — recovers its agent + project from the clones already there, and
-    relaunches a shell into the same branches. Use `just shell <agent> <project>
-    <slug>` to create a new session, or to pick one project when a session spans
-    several.
+    agents — recovers its agent + project and relaunches a shell into the same
+    branches. The project comes from the memory clone's branch, where the launcher
+    recorded it; clone labels are only a fallback, because one repo can belong to
+    several projects. Use `just shell <agent> <project> <slug>` to create a new
+    session.
     """
     session = _resolve_session(spec)
-
-    proj_labels = [c.label for c in session.clones if c.label != "scratchpad"]
-    if len(proj_labels) > 1:
-        listed = ", ".join(sorted(proj_labels))
-        raise click.ClickException(
-            f"session {session.agent}/{session.slug} spans multiple projects ({listed}); "
-            f"reopen one with 'just shell {session.agent} <project> {session.slug}'."
-        )
-
-    project = "-"
-    if proj_labels:
-        project = _project_for_label(proj_labels[0])
-        if project is None:
-            raise click.ClickException(
-                f"can't map clone '{proj_labels[0]}' back to a project manifest; "
-                f"reopen explicitly with 'just shell {session.agent} <project> {session.slug}'."
-            )
-
+    project = _project_from_memory_branch(session)
+    if project is None:
+        project = _project_from_clone_labels(session)
     _do_launch(session.agent, project, session.slug)
 
 
@@ -411,16 +497,20 @@ def agents(plain):
 @main.command("projects")
 @click.option("--plain", is_flag=True, default=None, help="Force plain TSV output.")
 def projects(plain):
-    """List configured projects."""
+    """List configured projects, one row per repo.
+
+    A project may declare several repos and a session mounts all of them, so the
+    listing is per repo rather than per project — the name repeats, which keeps
+    every row self-describing in the machine (TSV) mode.
+    """
     projects_dir = manifest.config_dir() / "projects"
     rows = []
     if projects_dir.exists():
         for path in sorted(projects_dir.glob("*.yaml")):
             data = manifest.load(path)
             name = manifest.get(data, "name") or path.stem
-            proj_path = manifest.get(data, "path") or ""
-            repo = manifest.get(data, "repository") or ""
-            rows.append((name, proj_path, repo))
+            for entry in manifest.project_repos(data, path.stem):
+                rows.append((name, entry["path"] or "", entry["repository"] or ""))
     console.render_table(["name", "path", "repository"], rows, plain=plain)
 
 
@@ -538,18 +628,20 @@ def _clean_builtins(tc: dict) -> list[tuple[str, str]]:
 def _clean_map_from_projects(projects: list[dict]) -> dict[str, list[str]]:
     """Map clone label (repo basename) -> custom clean commands, from project dicts.
 
-    The key matches the clone label `session.ensure` derives from the manifest's
-    `repository` (its last path segment), so a session's project clone can look
-    up its override. Projects without `clean` are omitted.
+    The key matches the clone label `session.ensure` derives from a repo's
+    `repository` (its last path segment), so a session's clone can look up its
+    override. `clean` is per *repo*, not per project — a multi-repo project's
+    entries each carry their own. Repos without `clean` are omitted.
     """
     out: dict[str, list[str]] = {}
     for data in projects:
-        if not (clean := data.get("clean")):
-            continue
-        repo = (data.get("repository") or "").rstrip("/")
-        label = repo.split("/")[-1] if repo else (data.get("name") or "")
-        if label:
-            out[label] = _as_list(clean)
+        for entry in manifest.project_repos(data, data.get("name") or ""):
+            if not (clean := entry["clean"]):
+                continue
+            repo = (entry["repository"] or "").rstrip("/")
+            label = repo.split("/")[-1] if repo else (data.get("name") or "")
+            if label:
+                out[label] = _as_list(clean)
     return out
 
 
