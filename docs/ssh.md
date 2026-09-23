@@ -25,9 +25,11 @@ So to use a particular key set (e.g. 1Password's), make that your default agent
 (below). Forwarding is automatic; there's no per-launch flag.
 
 If your default agent holds no keys, the symptom is an in-container
-`Permission denied (publickey)` even when host `git` works — check `ssh-add -l` on
-the host (see Verify below). `karakum launch` probes this before starting the
-container and warns; see [Launch-time check](#launch-time-check).
+`Permission denied (publickey)` even when host `git` works — check with
+`ssh -T git@github.com` on the host (see Verify below; `ssh-add -l` can say "no
+identities" on a host whose `ssh` works, so it isn't the test). `karakum launch`
+probes this before starting the container and warns; see
+[Launch-time check](#launch-time-check).
 
 ## Launch-time check
 
@@ -36,10 +38,19 @@ can't see, and every way it can go wrong looks identical from in there: a bare
 `Permission denied (publickey)`. So the launcher does the first GitHub handshake
 on the host, before the container starts, and warns on what it finds:
 
-- the default agent is unreachable, or holds no identities;
-- the agent has keys but GitHub rejects them;
-- the handshake doesn't complete in 20s — almost always an unapproved 1Password
-  prompt (see below).
+- the handshake fails — the agent is unreachable, holds no keys, or holds keys
+  GitHub rejects;
+- it doesn't complete in 20s — almost always an unapproved 1Password prompt
+  (see below).
+
+**The handshake is the whole check** — one `ssh -T git@github.com`, and nothing
+else gets an opinion. It's tempting to enumerate the agent first with
+`ssh-add -l` and skip the network call when it comes back empty, but `ssh-add`
+reads `$SSH_AUTH_SOCK` and never parses `ssh_config`: on a host that reaches its
+keys through an `IdentityAgent` line (how 1Password wires itself up) it reports
+*"no identities"* while `ssh` and `git` work fine. It answers for a different
+agent than the one a push uses, so it can only manufacture false warnings.
+`ssh -T` honours the full config and sees exactly the keys a push would.
 
 It only ever warns. Offline, an unreachable GitHub, or a host with no
 `known_hosts` entry for github.com are not verdicts about your agent, so they pass
@@ -65,6 +76,11 @@ Make the 1Password agent your host default; then `auto` forwards it.
    ```bash
    ssh-add -l        # lists your GitHub key (no SSH_AUTH_SOCK override needed)
    ```
+
+   If this says *"The agent has no identities"* but `ssh -T git@github.com` greets
+   you, 1Password is wired up via `IdentityAgent` only and your shell's
+   `$SSH_AUTH_SOCK` points somewhere else. Pushes still work; export the socket
+   `ssh -G git@github.com | grep identityagent` names to make the two agree.
 
 ## Commit signing
 

@@ -78,25 +78,16 @@ def check_ssh_agent() -> None:
     this terminal — it turns both cases into an actionable message and gets any
     approval prompt out of the way before the session starts. Offline / GitHub
     unreachable never gates a launch, and neither does this check: it only warns.
-    """
-    if not shutil.which("ssh-add") or not shutil.which("ssh"):
-        return  # no openssh on the host: nothing to probe, and nothing we can advise
 
-    listing = subprocess.run(["ssh-add", "-l"], capture_output=True, text=True)
-    if listing.returncode == 2:
-        console.warn(
-            "WARNING — can't reach the host SSH agent. In-container `git push` will fail with "
-            "'Permission denied (publickey)'."
-        )
-        console.detail("start an agent, or make 1Password's your default — see docs/ssh.md")
-        return
-    if listing.returncode == 1:
-        console.warn(
-            "WARNING — the host SSH agent holds no identities. In-container `git push` will fail "
-            "with 'Permission denied (publickey)'."
-        )
-        console.detail("`ssh-add <key>`, or make 1Password's agent your default — see docs/ssh.md")
-        return
+    The handshake is the whole check. Enumerating the agent with `ssh-add -l`
+    can't sharpen it: `ssh-add` reads `$SSH_AUTH_SOCK` and never parses
+    `ssh_config`, so on a host that reaches its keys through an `IdentityAgent`
+    line — how 1Password wires itself up — it reports "no identities" while `ssh`
+    and `git` work fine. It answers for a different agent than the one a push
+    uses, which makes it worse than no signal at all.
+    """
+    if not shutil.which("ssh"):
+        return  # no openssh on the host: nothing to probe, and nothing we can advise
 
     # `ssh -T git@github.com` exits 1 on *success* (GitHub refuses shell access), so the
     # greeting is the verdict, not the status. BatchMode suppresses ssh's own passphrase
@@ -130,7 +121,7 @@ def check_ssh_agent() -> None:
     if "Could not resolve hostname" in output or "Connection timed out" in output:
         return  # offline / GitHub unreachable — not the agent's fault
     console.warn(
-        "WARNING — the host SSH agent has keys but GitHub rejected them. In-container "
+        "WARNING — the host SSH agent didn't authenticate to GitHub. In-container "
         "`git push` will fail with 'Permission denied (publickey)'."
     )
     console.detail("reproduce on the host with `ssh -T git@github.com` — see docs/ssh.md")
