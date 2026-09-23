@@ -1,0 +1,64 @@
+# Open WebUI — a *service* harness, chained onto the root compose:
+#   docker compose -f docker-compose.yaml \
+#                  -f containers/openwebui/compose.openwebui.yaml up -d openwebui
+#
+# The other harnesses (claude/codex/opencode/pi) are CLIs on PATH in the one
+# `agent` image, picked inside the session shell. This one is a server in a
+# prebuilt upstream image, so it is a second compose service rather than another
+# binary — the one case AGENTS.md's "no new service/recipe" rule doesn't cover,
+# since that rule is about agent CLIs.
+#
+# Mounts/env follow the same ${VAR} contract as `agent`; the `:-/dev/null` guards
+# keep `docker compose build`/`config` working when the launcher hasn't exported
+# them. Nothing karakum-specific lives inside the service definition.
+
+services:
+  openwebui:
+    # Pinned deliberately: Open WebUI has already migrated its config storage
+    # (single JSON blob -> one row per dot-notation key), so a silent :main bump
+    # across a schema migration breaks a running box quietly.
+    # 0.9.6+ is required by oikb (see compose.oikb.yaml).
+    image: ghcr.io/open-webui/open-webui:v0.11.3
+    restart: unless-stopped
+    environment:
+      # Bedrock speaks OpenAI-compatible natively — no gateway container. Two
+      # things differ from api.openai.com: the base path is NOT /v1, and auth is
+      # a bearer token rather than SigV4. Trailing slashes break the /models call.
+      #   bedrock-mantle:  https://bedrock-mantle.<region>.api.aws/openai/v1
+      #   bedrock-runtime: https://bedrock-runtime.<region>.amazonaws.com/openai/v1
+      # Prefer mantle: it cannot serve cross-region inference profiles, so region
+      # residency is structural rather than a config discipline.
+      OPENAI_API_BASE_URL: ${OPENWEBUI_API_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENWEBUI_API_KEY:-}
+      ENABLE_OLLAMA_API: "False"
+
+      # Most settings are ConfigVars: read from env on FIRST boot, persisted into
+      # webui.db, and read from there forever after. False keeps env authoritative
+      # on every launch, so the manifest stays the source of truth.
+      ENABLE_PERSISTENT_CONFIG: "False"
+
+      # Signs JWTs. Must be stable across restarts or every user is logged out.
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:-}
+      ENABLE_SIGNUP: "False"   # first account becomes admin, then the door closes
+      # Required by `karakum serve`'s post-start wiring and by oikb: both
+      # authenticate with an API key, and there is no documented way to mint an
+      # admin token non-interactively. Note the plural — ENABLE_API_KEY (singular)
+      # is silently ignored.
+      #
+      # These keys are stored in the clear and their expires_at column is never
+      # written, so expiry is not enforced. Set False on any instance that isn't
+      # driving the API.
+      ENABLE_API_KEYS: "True"
+      WEBUI_URL: ${OPENWEBUI_URL:-http://localhost:3000}
+    volumes:
+      # Per-harness state under <state_root>/<agent>-openwebui, a host dir owned by
+      # the launching user — same pattern as ~/.claude and ~/.codex, so container
+      # lifetime and state lifetime stay independent.
+      #   webui.db (users, chats, config) + vector_db/ + uploads/ + cache/
+      - ${OPENWEBUI_STATE_DIR:-/dev/null}:/app/backend/data:rw
+      # The agent's vault, read-only: the same memory clone the CLIs get, so the
+      # knowledge base can point at scratchpad/.
+      - ${MEMORY_SESSION:-/dev/null}:/vault:ro
+    # No `ports:`. AGENTS.md: no service ever publishes ports to the host; ingress
+    # flows through a Tailscale sidecar (#16). For local development only, chain
+    # compose.localhost.yaml (`karakum serve <agent> --publish`).

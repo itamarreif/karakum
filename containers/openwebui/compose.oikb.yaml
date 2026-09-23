@@ -1,0 +1,27 @@
+# Optional overlay: keep a knowledge base in step with the agent's vault.
+#
+# oikb is Open WebUI's own sync tool. It checksums every file, asks the server
+# via /sync/diff what actually changed, and uploads only that — so re-syncing a
+# whole vault costs nothing when nothing moved, and notes never get re-embedded
+# for no reason.
+#
+# Started in a second pass by `karakum serve --knowledge`, not alongside
+# openwebui: the knowledge-base id is a server-assigned UUID, so it can't exist
+# until the server does. See _wire_memory in karakum/cli.py.
+#
+# Requires Open WebUI 0.9.6+.
+
+services:
+  oikb:
+    image: ghcr.io/open-webui/oikb
+    restart: unless-stopped
+    depends_on: [openwebui]
+    command: ["watch", "/vault/scratchpad", "--kb-id", "${OIKB_KB_ID}"]
+    environment:
+      # Service name on the compose network — the published host port is a
+      # development convenience and may not exist.
+      OPEN_WEBUI_URL: http://openwebui:8080
+      OPEN_WEBUI_API_KEY: ${OPENWEBUI_API_KEY_ADMIN:-}
+    volumes:
+      # Same read-only vault mount the app gets. oikb only ever reads.
+      - ${MEMORY_SESSION:-/dev/null}:/vault:ro

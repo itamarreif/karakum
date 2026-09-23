@@ -1,0 +1,14 @@
+# DEVELOPMENT ONLY — publishes Open WebUI on the host loopback.
+#
+# This is a deliberate, scoped exception to AGENTS.md's "no service ever publishes
+# ports to the host". It binds 127.0.0.1 explicitly (never 0.0.0.0), so nothing is
+# reachable from the LAN, and it is opt-in via `--publish` rather than being part
+# of the default service definition.
+#
+# The real ingress story is the Tailscale sidecar (#16); this exists so the
+# harness can be exercised before that lands.
+
+services:
+  openwebui:
+    ports:
+      - "127.0.0.1:${OPENWEBUI_PORT:-3000}:8080"
