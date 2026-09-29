@@ -26,16 +26,28 @@ def _run(*args):
     subprocess.run(args, check=True, capture_output=True)
 
 
+def _commit(path, text="x"):
+    (Path(path) / "README").write_text(text)
+    _run("git", "-C", str(path), "add", "-A")
+    _run("git", "-C", str(path), "-c", "user.email=a@b.c", "-c", "user.name=t",
+         "-c", "commit.gpgsign=false", "commit", "-qm", text)
+
+
 def _mkrepo(path):
-    """A throwaway git repo with one commit and an `origin` remote."""
+    """A throwaway git repo with one commit and a **local bare `origin`**.
+
+    The origin is a bare repo next to it rather than an `https://` URL, because
+    `session.ensure` fetches before branching: a local origin keeps that real
+    fetch offline and instant (docs/testing.md §1).
+    """
     path.mkdir(parents=True)
     p = str(path)
+    remote = f"{p}.git"
+    _run("git", "init", "-q", "--bare", "-b", "main", remote)
     _run("git", "init", "-q", "-b", "main", p)
-    (path / "README").write_text("x")
-    _run("git", "-C", p, "add", "-A")
-    _run("git", "-C", p, "-c", "user.email=a@b.c", "-c", "user.name=t",
-         "-c", "commit.gpgsign=false", "commit", "-qm", "init")
-    _run("git", "-C", p, "remote", "add", "origin", "https://example.com/x.git")
+    _commit(path, "init")
+    _run("git", "-C", p, "remote", "add", "origin", remote)
+    _run("git", "-C", p, "push", "-q", "origin", "main")
 
 
 def _branch(path):

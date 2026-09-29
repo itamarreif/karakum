@@ -41,6 +41,17 @@ and on branching by return code — that's where the regressions we've actually 
 live (the `+agent` email subaddress order, SSH-signing gating, `docker ps`
 without `-q`).
 
+## 3a. Give throwaway repos a local bare `origin`
+
+`session.ensure` fetches before it branches, so a test repo whose `origin` is an
+`https://` URL either can't exercise that path or reaches the network. `_mkrepo`
+(`tests/test_launch_branches.py`) creates a bare repo next to each throwaway
+checkout, pushes `main`, and points `origin` at it — the real fetch then runs
+against a local path: offline, instant, and with no mock in the way. With that in
+place a test can stage the exact situation the code exists for, by advancing the
+bare repo while leaving the host checkout behind (`_push_to_remote` in
+`test_session_start_point.py`).
+
 ## 4. Test command wiring with Click's `CliRunner`
 
 For the command layer, invoke `cli.main` through `CliRunner` with the helpers it

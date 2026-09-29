@@ -16,6 +16,8 @@ A session = (agent × project? × session-slug), with the CLI chosen at the shel
 
 Two repos whose names share a basename can't be in one project — they would collide on `~/<name>` — and the launcher refuses before creating any clone. Reuse of an existing clone never switches its branch: it is left where it is, and a mismatch warns naming both branches.
 
+A session clone's **bytes** come from the host checkout (local, fast, offline-capable), but its **branch point comes from origin**: the clone is fetched and the session branch is cut from the remote's default branch, so a host repo that is behind — or parked on an unmerged branch — can't decide where the session starts. A branch the remote already has is tracked instead (a resumed session); one the host already carried over is checked out as it stands and warned about, so host-side work is never clobbered. If the fetch fails, the launch still proceeds from the host checkout and says so.
+
 ## Layout
 
 ```
