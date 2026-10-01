@@ -213,7 +213,9 @@ cli.launch(agent, project, slug)   →   _do_launch(agent, project, slug)
 │        │     ├─ git -C <repo> remote get-url origin          (capture GitHub URL)
 │        │     ├─ git clone --no-local file://<repo> <session>  (independent .git)
 │        │     ├─ git -C <session> remote set-url origin <url>
-│        │     └─ git -C <session> checkout [-b] <memory_branch>
+│        │     ├─ git -C <session> fetch --prune origin        (non-fatal; FETCH_TIMEOUT)
+│        │     ├─ git -C <session> remote set-head origin -a   → origin/HEAD
+│        │     └─ git -C <session> checkout $(_checkout_args)  # start point, see below
 │        └─ session_name = slug          # slug-only identity (no date); KARAKUM_SESSION
 │
 ├─3 PROJECT (optional, only if project != "-") — one project, one *or more* repos
@@ -324,6 +326,19 @@ cli ─┬─► preflight ──► (subprocess: git; shutil: docker/gh)
   the container can never touch the host repo's git database. Branches/commits
   reach the host via GitHub push + pull/PR, not a shared `.git`. See the README
   "Mount contract" for the host-side guarantee.
+
+- **The branch point comes from origin, not the host.** Cloning locally is what
+  makes a launch fast and offline-capable, but the clone's refs are the *host's*:
+  a host checkout that is behind, or parked on an unmerged branch, used to hand
+  the session that commit silently. So `ensure` fetches (`--prune`, because those
+  copied `origin/*` refs no longer describe the real origin) and `_checkout_args`
+  picks the start point, in order: a branch the host carried over is checked out
+  as it stands (never clobber unpushed work — warned about); else a branch the
+  remote already has is tracked (a resumed session); else the branch is cut
+  `--no-track` from `origin/HEAD` — tracking `origin/main` from a session branch
+  would make a bare `git push` refuse under `push.default=simple`; else, when the
+  fetch failed, the clone's HEAD, with a warning naming the branch. A failed fetch
+  is never fatal: an offline launch still works exactly as it did before.
 
 - **Session layout & identity.** Clones live under one root, grouped by session:
   `<sessions_root>/<agent>/<slug>/<label>` (`label` = `scratchpad` for memory, or
