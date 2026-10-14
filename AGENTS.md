@@ -8,8 +8,8 @@ This file uses [AGENTS.md](https://agents.md/) — the harness-agnostic conventi
 
 karakum decouples three things that older agent systems conflate:
 
-1. **CLI** = which agent you drive. The single agent image carries `claude`, `codex`, `opencode`, and `pi` on `PATH`; you pick one **inside** the session shell — it is not a launch argument. (The image's build toolchains — node/python/rust/proto — are pinned in `toolchains.yaml`.)
-2. **Agent** = identity. Has a name + memory (the persistent self: skills, scratchpad, master prompt). Declared in `agents/<name>.yaml`. **No** CLI field, **no** project field — agents are portable across both. Secrets are host-wide, not per-agent (declared once in `secrets.yaml`). Each CLI's state persists in a per-agent host dir under `<state_root>` (default `~/.karakum/state`): claude `~/.claude`, opencode `~/.config/opencode` + `~/.local/share/opencode`, codex `~/.codex`, pi `~/.pi`.
+1. **CLI** = which agent you drive. The single agent image carries `claude`, `codex`, `opencode`, `pi`, and `omp` on `PATH`; you pick one **inside** the session shell — it is not a launch argument. (The image's build toolchains — node/python/rust/proto — are pinned in `toolchains.yaml`.)
+2. **Agent** = identity. Has a name + memory (the persistent self: skills, scratchpad, master prompt). Declared in `agents/<name>.yaml`. **No** CLI field, **no** project field — agents are portable across both. Secrets are host-wide, not per-agent (declared once in `secrets.yaml`). Each CLI's state persists in a per-agent host dir under `<state_root>` (default `~/.karakum/state`): claude `~/.claude`, opencode `~/.config/opencode` + `~/.local/share/opencode`, codex `~/.codex`, pi `~/.pi`, omp `~/.omp`.
 3. **Project** = the workspace the agent acts on for this session. Declared in `projects/<name>.yaml`. Optional per session. **A project is one *or more* repos** — `projects/platform.yaml` can list dewey and mundaneum, and the session mounts both. Same agent can work on different projects across sessions.
 
 A session = (agent × project? × session-slug), with the CLI chosen at the shell. The launcher mounts the agent's memory clone and one clone per repo the project declares, each independent. Branches are namespaced per role: every repo clone is on `<agent>/<slug>`, the memory clone on `<project>/<slug>` (or a bare `<slug>` when there's no project) — one project per session, so that name is unambiguous however many repos it holds.
@@ -22,7 +22,7 @@ A session clone's **bytes** come from the host checkout (local, fast, offline-ca
 
 ```
 karakum/                    # THIS REPO — version-controlled, generic
-  containers/               Docker images: base, toolchain-* layers, and agent/ (base + toolchains + claude/codex/opencode/pi).
+  containers/               Docker images: base, toolchain-* layers, and agent/ (base + toolchains + claude/codex/opencode/pi/omp).
   Justfile                  Host entry point: thin recipes dispatching to the CLI.
   karakum/                  Python CLI package (uv pip install -e . or uv run karakum).
     cli.py                  Entry point: launch, resume, pngpaste, build, agents, projects, session group (ls / rm / clean / down).
@@ -73,9 +73,9 @@ Orchestration logic lives in the Python package (`karakum/`) — including Docke
 
 ## Conventions specific to karakum
 
-- **Mount paths inside the container never reveal host paths** — the inverse of what this line used to claim. Nothing is mounted at its host path: session clones land at `~/<agent>` and `~/<repo-name>` (`CONTAINER_HOME` in `cli.py`), per-CLI state at `~/.claude` / `~/.config/opencode` / `~/.codex` / `~/.pi`, the forwarded SSH agent at `/ssh-agent.sock`. The container is given no way to learn where any of it lives on the host.
+- **Mount paths inside the container never reveal host paths** — the inverse of what this line used to claim. Nothing is mounted at its host path: session clones land at `~/<agent>` and `~/<repo-name>` (`CONTAINER_HOME` in `cli.py`), per-CLI state at `~/.claude` / `~/.config/opencode` / `~/.codex` / `~/.pi` / `~/.omp`, the forwarded SSH agent at `/ssh-agent.sock`. The container is given no way to learn where any of it lives on the host.
 - Session clones (memory + project) are bind-mounted at runtime; the host repos' `.git` is never mounted, so a session can't reach the host's branches/refs/config.
-- New agent CLI = add it to `containers/agent/Dockerfile` (on `PATH`) + persist its state dir in `_do_launch` + mount it in `docker-compose.yaml`. No new service/recipe — it's one image.
+- New agent CLI = add it to `containers/agent/Dockerfile` (on `PATH`) + persist its state dir in `_do_launch` + mount it in `docker-compose.yaml`. No new service/recipe — it's one image. A CLI whose runtime the image doesn't already carry (omp needs bun) goes in as its upstream release binary, pinned by tag **and** sha256, rather than dragging in a toolchain for one tool.
 - New build toolchain = new `containers/toolchain-<name>/Dockerfile` + entry in `toolchains.yaml` + COPY into `containers/agent/Dockerfile` + build step in `cli.build`.
 - New agent = new `agents/<name>.yaml`. No code changes.
 - New project = new `projects/<name>.yaml`. No code changes.
