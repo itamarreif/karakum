@@ -3,8 +3,8 @@
 # edit, where <config-dir> is $KARAKUM_CONFIG_DIR (default ~/.config/karakum).
 #
 # An agent is decoupled from:
-#   - the CLI it runs with (the one image carries claude, codex, opencode, and pi;
-#     you pick one after `just shell`)
+#   - the CLI it runs with (the one image carries claude, codex, opencode, pi, and
+#     omp; you pick one after `just shell`)
 #   - the project it works on (passed at invocation: `just shell <agent> <project> <slug>`)
 #
 # Memory = the agent's persistent self (skills, scratchpad, master prompt).
@@ -36,19 +36,33 @@ memory:
   #   opencode → ~/.config/opencode/AGENTS.md
   #   codex    → ~/.codex/AGENTS.md
   #   pi       → ~/.pi/agent/AGENTS.md        (+ ~/.pi/agent/skills)
+  #   omp      → ~/.omp/agent/AGENTS.md       (skills via config.yml, see below)
   # Link skills for *every* CLI that reads a skill dir, not just one: a memory
   # repo full of skills that the running CLI can't see fails silently — the
   # agent simply never loads them, and the only symptom is work not getting
   # done the way the skills describe. Claude Code discovers personal skills at
   # ~/.claude/skills/<name>/SKILL.md, and only watches that directory if it
   # existed at startup, so a manifest fixed mid-session needs a fresh launch.
-  # The `mkdir -p` keeps the hook self-contained — pi's dir is a subdir of the
-  # ~/.pi mount (not a mount point like the others), so it may not exist yet.
+  # omp is the exception: it reads no global skills dir, so its skills are a
+  # config key instead of a symlink (docs/oh-my-pi.md). The guard keys on the
+  # setting, not on the file: omp's first run creates config.yml itself (your
+  # model pick), so a file-exists guard would never wire skills on a state dir
+  # omp had already used.
+  # The `mkdir -p` keeps the hook self-contained — pi's and omp's dirs are subdirs
+  # of the ~/.pi / ~/.omp mounts (not mount points like the others), so they may
+  # not exist yet.
+  # Past a few lines, move the shell into the memory repo and call it from here
+  # (`init: ./scripts/init-clis.sh` — the hook's cwd is $KARAKUM_MEMORY), so what
+  # a vault contains stays version-controlled with the vault.
   # init: |
-  #   mkdir -p "$HOME/.pi/agent"
+  #   mkdir -p "$HOME/.pi/agent" "$HOME/.omp/agent"
   #   ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.claude/CLAUDE.md"
   #   ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.config/opencode/AGENTS.md"
   #   ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.codex/AGENTS.md"
   #   ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.pi/agent/AGENTS.md"
+  #   ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.omp/agent/AGENTS.md"
   #   ln -sfn "$KARAKUM_MEMORY/skills"           "$HOME/.claude/skills"
   #   ln -sfn "$KARAKUM_MEMORY/skills"           "$HOME/.pi/agent/skills"
+  #   grep -qs customDirectories "$HOME/.omp/agent/config.yml" \
+  #     || printf 'skills:\n  customDirectories:\n    - %s/skills\n' "$KARAKUM_MEMORY" \
+  #        >> "$HOME/.omp/agent/config.yml"

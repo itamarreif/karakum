@@ -1,8 +1,9 @@
 # pi (pi.dev) setup
 
-[`pi`](https://pi.dev) is one of the four agent CLIs on `PATH` in the agent image
-(alongside `claude`, `codex`, and `opencode`). You pick it inside the session shell
-by running `pi` — it is not a launch argument. This page covers how pi is wired and
+[`pi`](https://pi.dev) is one of the five agent CLIs on `PATH` in the agent image
+(alongside `claude`, `codex`, `opencode`, and `omp` — a pi fork, wired separately in
+[oh-my-pi.md](oh-my-pi.md), with its own state and its own `PI_*` env reads). You
+pick it inside the session shell by running `pi` — it is not a launch argument. This page covers how pi is wired and
 how to authenticate it for the two common cases.
 
 ## How pi is wired
@@ -77,7 +78,8 @@ pi has three injection points (see `resource-loader.ts`):
 
 We link the master prompt as `AGENTS.md` because it's a persona/workflow layer meant to
 sit *on top of* the harness, and it's the **only cross-CLI convention** (claude
-`CLAUDE.md`, opencode/codex `AGENTS.md`) — one file links identically for all four.
+`CLAUDE.md`, opencode/codex `AGENTS.md`, omp `~/.omp/agent/AGENTS.md`) — one file
+links identically for all five.
 `SYSTEM.md` would throw away pi's built-in tool/format/behavior instructions (breaking
 the agent unless you reproduce them) and is pi-only. `APPEND_SYSTEM.md` is a reasonable
 pi-only escalation if you ever need the master prompt enforced at system-prompt strength
@@ -109,8 +111,8 @@ required. This is the pi analog of claude's `~/.claude/skills/`.
 ```yaml
 secrets:
   CLAUDE_CODE_OAUTH_TOKEN: op://Personal/karakum claude code oauth token/credential  # claude
-  ANTHROPIC_OAUTH_TOKEN:   op://Personal/karakum claude code oauth token/credential  # pi (same token)
-  # deliberately NO ANTHROPIC_API_KEY — so both claude and pi bill the subscription
+  ANTHROPIC_OAUTH_TOKEN:   op://Personal/karakum claude code oauth token/credential  # pi + omp (same token)
+  # deliberately NO ANTHROPIC_API_KEY — so claude, pi and omp all bill the subscription
   GH_TOKEN: op://Personal/GitHub/token
 ```
 
@@ -124,8 +126,8 @@ Both point at the **same** 1Password item — one `sk-ant-oat` token (the kind
 
 ```yaml
 secrets:
-  ANTHROPIC_API_KEY: op://Work/Anthropic/key   # claude, opencode, pi
-  OPENAI_API_KEY:    op://Work/OpenAI/key       # codex, opencode, pi
+  ANTHROPIC_API_KEY: op://Work/Anthropic/key   # claude, opencode, pi, omp
+  OPENAI_API_KEY:    op://Work/OpenAI/key       # codex, opencode, pi, omp
   GH_TOKEN: op://Work/GitHub/token
 ```
 
