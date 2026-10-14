@@ -44,8 +44,10 @@ memory:
   # ~/.claude/skills/<name>/SKILL.md, and only watches that directory if it
   # existed at startup, so a manifest fixed mid-session needs a fresh launch.
   # omp is the exception: it reads no global skills dir, so its skills are a
-  # config key instead of a symlink (docs/oh-my-pi.md). The file is written only
-  # when absent, so your own `omp config set` edits survive.
+  # config key instead of a symlink (docs/oh-my-pi.md). The guard keys on the
+  # setting, not on the file: omp's first run creates config.yml itself (your
+  # model pick), so a file-exists guard would never wire skills on a state dir
+  # omp had already used.
   # The `mkdir -p` keeps the hook self-contained — pi's and omp's dirs are subdirs
   # of the ~/.pi / ~/.omp mounts (not mount points like the others), so they may
   # not exist yet.
@@ -61,5 +63,6 @@ memory:
   #   ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.omp/agent/AGENTS.md"
   #   ln -sfn "$KARAKUM_MEMORY/skills"           "$HOME/.claude/skills"
   #   ln -sfn "$KARAKUM_MEMORY/skills"           "$HOME/.pi/agent/skills"
-  #   [ -f "$HOME/.omp/agent/config.yml" ] || printf 'skills:\n  customDirectories:\n    - %s/skills\n' \
-  #     "$KARAKUM_MEMORY" > "$HOME/.omp/agent/config.yml"
+  #   grep -qs customDirectories "$HOME/.omp/agent/config.yml" \
+  #     || printf 'skills:\n  customDirectories:\n    - %s/skills\n' "$KARAKUM_MEMORY" \
+  #        >> "$HOME/.omp/agent/config.yml"

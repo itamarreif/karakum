@@ -110,6 +110,22 @@ runs the hook verbatim and stays framework-agnostic. There is also an `omp confi
 set <key> <value>` CLI; whether it accepts a list value in one call is untested
 here, so the snippet writes the file.
 
+**Append when the key is missing, don't write only when the file is missing.** omp's
+own first run creates `config.yml` (your model pick from the setup scene), so a
+`[ -f config.yml ] ||` guard would quietly never fire again on any state dir where
+omp has already run — skills would stay unwired with nothing to show why. Keying the
+guard on the *setting* instead is idempotent either way:
+
+```sh
+grep -qs customDirectories "$HOME/.omp/agent/config.yml" \
+  || printf 'skills:\n  customDirectories:\n    - %s/skills\n' "$KARAKUM_MEMORY" \
+     >> "$HOME/.omp/agent/config.yml"
+```
+
+The one case this gets wrong: if your `config.yml` already has a top-level `skills:`
+block for something else, appending a second one makes a duplicate key and YAML keeps
+only the last. Add the directory with `omp config set` by hand in that case.
+
 ## The `memory.init` hook
 
 `memory.init` in `agents/<name>.yaml` runs in-container after the mounts land, from
@@ -129,13 +145,15 @@ memory:
     ln -sfn "$KARAKUM_MEMORY/MASTER_PROMPT.md" "$HOME/.omp/agent/AGENTS.md"
     ln -sfn "$KARAKUM_MEMORY/skills"           "$HOME/.claude/skills"
     ln -sfn "$KARAKUM_MEMORY/skills"           "$HOME/.pi/agent/skills"
-    [ -f "$HOME/.omp/agent/config.yml" ] || printf 'skills:\n  customDirectories:\n    - %s/skills\n' \
-      "$KARAKUM_MEMORY" > "$HOME/.omp/agent/config.yml"
+    grep -qs customDirectories "$HOME/.omp/agent/config.yml" \
+      || printf 'skills:\n  customDirectories:\n    - %s/skills\n' "$KARAKUM_MEMORY" \
+         >> "$HOME/.omp/agent/config.yml"
 ```
 
 The links are re-made every session (`ln -sfn` is idempotent), so a rebuild re-wires
-them. The config file is written only when absent, so your own `omp config set`
-edits — a model role, a theme — survive; delete it to get the default back.
+them. The config line adds the skills directory once and then finds it already there,
+so your own `omp config set` edits — a model role, a theme — live alongside it
+untouched; drop the `customDirectories` lines to unwire the vault's skills.
 
 Once a hook grows past a few lines, keep the shell **in the vault** and let the
 manifest call it: `init: ./scripts/init-clis.sh` (the hook's cwd is
