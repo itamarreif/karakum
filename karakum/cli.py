@@ -22,8 +22,8 @@ from karakum import session as ksession
 CONTAINER_HOME = "/home/agent"
 
 # The bundled agent image (built by `karakum build` via `docker compose build`,
-# tagged from docker-compose.yaml's `image:`). It carries four interchangeable
-# agent CLIs (claude / codex / opencode / pi) plus every toolchain, so `session clean`
+# tagged from docker-compose.yaml's `image:`). It carries five interchangeable
+# agent CLIs (claude / codex / opencode / pi / omp) plus every toolchain, so `session clean`
 # runs over a session's clones inside it with all clean tools present.
 AGENT_IMAGE = "karakum-agent:latest"
 
@@ -146,7 +146,7 @@ def main():
 @click.argument("project")
 @click.argument("slug")
 def launch(agent, project, slug):
-    """Drop into a session shell (in ~); run claude/codex/opencode/pi from there.
+    """Drop into a session shell (in ~); run claude/codex/opencode/pi/omp from there.
 
     PROJECT is one manifest name (which may itself declare several repos), or `-`
     for a memory-only session.
@@ -160,7 +160,7 @@ def _do_launch(agent, project, slug):
     Ensures the memory clone and one clone per repo the project declares (`-` for
     a memory-only session), wires up secrets / git identity / per-CLI state, then
     execs `docker compose run` into a shell. There is one agent image carrying
-    claude/codex/opencode/pi; the user runs whichever CLI they want once inside.
+    claude/codex/opencode/pi/omp; the user runs whichever CLI they want once inside.
     Existing clones are reused in place, so this doubles as the `resume` path.
 
     A project is one *or more* repos (`manifest.project_repos`), so a `platform`
@@ -281,6 +281,7 @@ def _do_launch(agent, project, slug):
         (state_root / f"{agent}-opencode-data", "OPENCODE_DATA_DIR"), # → ~/.local/share/opencode
         (state_root / f"{agent}-codex",      "CODEX_STATE_DIR"),      # → ~/.codex
         (state_root / f"{agent}-pi",         "PI_STATE_DIR"),         # → ~/.pi
+        (state_root / f"{agent}-omp",        "OMP_STATE_DIR"),        # → ~/.omp
     ):
         d.mkdir(parents=True, exist_ok=True)
         env[var] = str(d)
@@ -317,13 +318,20 @@ def _do_launch(agent, project, slug):
     # Auth is env-injected (ANTHROPIC_API_KEY / OPENAI_API_KEY, or ANTHROPIC_OAUTH_TOKEN
     # for a Claude subscription); nothing is written to ~/.pi/agent/auth.json.
     #
-    # We do create the ~/.pi/agent dir (empty — no settings). The other CLIs'
-    # instruction dirs exist as mounts (~/.claude, ~/.config/opencode, ~/.codex), but
-    # pi's is a *subdir* of the ~/.pi mount, so without this an agent's memory.init
-    # hook that links its master prompt into ~/.pi/agent/AGENTS.md (pi's global
-    # context file — see resource-loader's AGENTS.md candidates) would fail for lack
-    # of a parent dir. Creating it keeps memory.init uniform across all four CLIs.
+    # omp (oh-my-pi) is unseeded for the same reasons, and one more: its first-run
+    # setup scene *is* the model picker, so seeding a config would take away the
+    # choice karakum deliberately leaves to the user. Auth comes from the same
+    # injected env vars (see docs/oh-my-pi.md).
+    #
+    # We do create the ~/.pi/agent and ~/.omp/agent dirs (empty — no settings). The
+    # other CLIs' instruction dirs exist as mounts (~/.claude, ~/.config/opencode,
+    # ~/.codex), but these two are *subdirs* of the ~/.pi / ~/.omp mounts, so without
+    # this an agent's memory.init hook that links its master prompt into
+    # ~/.pi/agent/AGENTS.md or ~/.omp/agent/AGENTS.md (their global context files)
+    # would fail for lack of a parent dir. Creating them keeps memory.init uniform
+    # across all five CLIs.
     (state_root / f"{agent}-pi" / "agent").mkdir(parents=True, exist_ok=True)
+    (state_root / f"{agent}-omp" / "agent").mkdir(parents=True, exist_ok=True)
 
     # --- container name (unique per invocation to allow multiple terminals) ---
     slug_label = slug if not no_session else "main"

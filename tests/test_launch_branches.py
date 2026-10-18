@@ -174,7 +174,7 @@ def test_memory_only_session_uses_bare_slug(monkeypatch, tmp_path):
 def test_per_cli_state_dirs_created_and_opencode_seeded(monkeypatch, tmp_path):
     """Each agent CLI gets its own persistent host state dir + env var, and
     opencode's config is seeded once so it skips the first-run model picker.
-    pi is deliberately NOT seeded (the user picks a model; pi persists it)."""
+    pi and omp are deliberately NOT seeded (the user picks a model; they persist it)."""
     import json as _json
 
     mem, proj = tmp_path / "src_mem", tmp_path / "src_proj"
@@ -194,17 +194,22 @@ def test_per_cli_state_dirs_created_and_opencode_seeded(monkeypatch, tmp_path):
     assert env["OPENCODE_DATA_DIR"] == str(state / "alice-opencode-data")
     assert env["CODEX_STATE_DIR"] == str(state / "alice-codex")
     assert env["PI_STATE_DIR"] == str(state / "alice-pi")
-    for var in ("CLAUDE_STATE_DIR", "OPENCODE_CONFIG_DIR", "OPENCODE_DATA_DIR", "CODEX_STATE_DIR", "PI_STATE_DIR"):
+    assert env["OMP_STATE_DIR"] == str(state / "alice-omp")
+    for var in ("CLAUDE_STATE_DIR", "OPENCODE_CONFIG_DIR", "OPENCODE_DATA_DIR", "CODEX_STATE_DIR",
+                "PI_STATE_DIR", "OMP_STATE_DIR"):
         assert Path(env[var]).is_dir(), f"{var} dir not created"
 
     seed = _json.loads((state / "alice-opencode" / "opencode.json").read_text())
     assert seed["model"] == "anthropic/claude-sonnet-4-5"
     assert seed["autoupdate"] is False
 
-    # pi's agent dir is created (so a memory.init hook can link AGENTS.md into it,
-    # like the other CLIs' instruction dirs) but NOT seeded — no settings.json.
+    # pi's and omp's agent dirs are created (so a memory.init hook can link
+    # AGENTS.md into them, like the other CLIs' instruction dirs) but NOT seeded —
+    # no settings.json for pi, no config.yml for omp.
     assert (state / "alice-pi" / "agent").is_dir()
     assert not (state / "alice-pi" / "agent" / "settings.json").exists()
+    assert (state / "alice-omp" / "agent").is_dir()
+    assert not (state / "alice-omp" / "agent" / "config.yml").exists()
 
 
 def test_opencode_seed_not_clobbered_when_present(monkeypatch, tmp_path):

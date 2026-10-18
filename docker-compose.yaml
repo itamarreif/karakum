@@ -1,4 +1,4 @@
-# karakum compose: the single `agent` service (one image, four agent CLIs).
+# karakum compose: the single `agent` service (one image, five agent CLIs).
 # Mounts/env are declared here and parameterized by ${VARS} the launcher exports
 # (memory clone, per-agent ~/.claude state). The project clone (optional, so it
 # can't be a static line) and the variable-length secret set are the only things
@@ -7,8 +7,8 @@
 name: karakum
 
 services:
-  # One image, four interchangeable agent CLIs on PATH (claude / codex /
-  # opencode / pi) — the user picks one after `just shell`.
+  # One image, five interchangeable agent CLIs on PATH (claude / codex /
+  # opencode / pi / omp) — the user picks one after `just shell`.
   agent:
     build:
       context: ./containers/agent
@@ -25,6 +25,11 @@ services:
       # (the analog of opencode's seeded autoupdate:false). pi otherwise keeps all
       # state under ~/.pi/agent — the default PI_CODING_AGENT_DIR — which lands
       # inside the ~/.pi mount below, so no dir override is needed.
+      #
+      # NOTE: omp (oh-my-pi, a pi fork) reads the same PI_* env namespace, including
+      # PI_CONFIG_DIR and PI_CODING_AGENT_DIR. Both CLIs already default into their
+      # own mount (~/.pi, ~/.omp), so karakum sets neither — one dir override here
+      # would silently point *both* of them at the same state.
       PI_SKIP_VERSION_CHECK: "1"
     volumes:
       # Memory session clone (the vault), mounted under the container home
@@ -39,8 +44,10 @@ services:
       #   opencode → ~/.config/opencode (config) + ~/.local/share/opencode (data/auth)
       #   codex    → ~/.codex
       #   pi       → ~/.pi (config + sessions under ~/.pi/agent; auth is env-injected)
+      #   omp      → ~/.omp (config + sessions under ~/.omp/agent; auth is env-injected)
       - ${CLAUDE_STATE_DIR:-/dev/null}:/home/agent/.claude:rw
       - ${OPENCODE_CONFIG_DIR:-/dev/null}:/home/agent/.config/opencode:rw
       - ${OPENCODE_DATA_DIR:-/dev/null}:/home/agent/.local/share/opencode:rw
       - ${CODEX_STATE_DIR:-/dev/null}:/home/agent/.codex:rw
       - ${PI_STATE_DIR:-/dev/null}:/home/agent/.pi:rw
+      - ${OMP_STATE_DIR:-/dev/null}:/home/agent/.omp:rw

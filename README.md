@@ -9,13 +9,13 @@ Container infra for AI agents.
 karakum decouples:
 
 1. **CLI** (which agent you drive) — the one agent image carries `claude`, `codex`,
-   `opencode`, and `pi` on `PATH`; pick one inside the session shell. (The image's build
+   `opencode`, `pi`, and `omp` on `PATH`; pick one inside the session shell. (The image's build
    toolchains — node/python/rust/proto — come from `toolchains.yaml`.)
 2. **Agent** (identity: memory) — `<config-dir>/agents/<name>.yaml`. Decoupled from CLI and project.
 3. **Project** (workspace the agent acts on) — `<config-dir>/projects/<name>.yaml`. Optional per session; declares **one or more repos**, all mounted together.
 
 ```
-just shell <agent> <project> <slug>  # drops you in a shell in ~; then run claude / codex / opencode / pi
+just shell <agent> <project> <slug>  # drops you in a shell in ~; then run claude / codex / opencode / pi / omp
 just shell alice webapp fix-login    # agent=alice on project=webapp, session slug=fix-login
 just shell alice - organize-notes    # no project (memory only) — '-' skips the project
 just shell alice - -                 # no slug → runs on main branch (with disclaimer)
@@ -41,7 +41,7 @@ secrets.yaml             Host-wide secret references (op://…, env://…), neve
 # DATA ($KARAKUM_DATA_DIR, default ~/.karakum) — large, regenerable, NOT in dotfiles
 sessions/<agent>/<slug>/<label>/   Isolated git clones, one tree per session.
 state/<agent>/...                  Persistent per-agent CLI state (claude ~/.claude,
-                                   opencode/codex/pi configs — auth/trust/caches).
+                                   opencode/codex/pi/omp configs — auth/trust/caches).
 ```
 
 The split lets the repo be shared: nothing machine-specific (local paths,
@@ -55,7 +55,7 @@ version control. Within the data dir, `config.yaml` can redirect `sessions_root`
 ```
 karakum/
   containers/               Docker images: base, per-language toolchain-* layers,
-                            and agent/ (base + toolchains + the four agent CLIs).
+                            and agent/ (base + toolchains + the five agent CLIs).
   examples/                 Sample agents/, projects/, secrets.yaml, toolchains.yaml — copy into config dir.
   Justfile                  Host entry point — thin recipes dispatching to the CLI.
   karakum/                  Python CLI package (install with `just install`).
@@ -70,6 +70,7 @@ karakum/
   docs/architecture.md      CLI structure + per-command call graphs.
   docs/configuration.md     The three-location config model.
   docs/pi.md                pi (pi.dev) wiring + per-machine auth setup.
+  docs/oh-my-pi.md          omp (oh-my-pi) wiring: pinned binary, state, skills.
   pyproject.toml            Python package definition.
 ```
 
@@ -127,14 +128,19 @@ just shell <agent> - -                               # no slug: run on main bran
 just resume <slug>                                   # reopen an existing session by slug (agent + project recovered from disk)
 ```
 
-The image carries four agent CLIs on `PATH` — `claude`, `codex`, `opencode`, and `pi`.
+The image carries five agent CLIs on `PATH` — `claude`, `codex`, `opencode`, `pi`,
+and `omp` ([oh-my-pi](docs/oh-my-pi.md), a pi fork with an IDE wired in).
 `just shell` drops you at a prompt in the session home (`~`); run whichever agent
 you want there, or work in the shell directly. `claude` authenticates from
-`CLAUDE_CODE_OAUTH_TOKEN` (or `ANTHROPIC_API_KEY`); `codex`, `opencode`, and `pi` read
-`OPENAI_API_KEY` / `ANTHROPIC_API_KEY` — all supplied via `secrets.yaml` (below). `pi`
-can additionally run on a Claude subscription from `ANTHROPIC_OAUTH_TOKEN` (an
-`sk-ant-oat` token, same kind `claude setup-token` mints) — env-injected like the
-rest, so no interactive login and no credential on disk.
+`CLAUDE_CODE_OAUTH_TOKEN` (or `ANTHROPIC_API_KEY`); `codex`, `opencode`, `pi`, and
+`omp` read `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` — all supplied via `secrets.yaml`
+(below). `pi` and `omp` can additionally run on a Claude subscription from
+`ANTHROPIC_OAUTH_TOKEN` (an `sk-ant-oat` token, same kind `claude setup-token`
+mints) — env-injected like the rest, so no interactive login and no credential on
+disk. Four CLIs install from npm at `latest`; `omp` is a release binary pinned by
+tag and sha256 in `containers/agent/Dockerfile` (it needs a bun runtime npm would
+not provide), so upgrading it is a deliberate edit — see
+[`docs/oh-my-pi.md`](docs/oh-my-pi.md).
 
 `uv tool install --editable .` keeps the installed `karakum` importing from this
 checkout, so `karakum_root()` still resolves to the repo where
@@ -199,8 +205,8 @@ Session clones mount **under the container home (`~`)**, never at their host pat
 - **Project session clones** — one per repo the project declares, at host `<sessions_root>/<agent>/<slug>/<repo>/`, each mounted **RW** at `~/<repo>` (the repo name).
 - **CWD** inside the container = `~` (home); the memory clone and every repo sit as siblings under it.
 - **User**: the baked `agent` account is renamed at runtime to the launching agent (e.g. `alice`) by the image entrypoint, so `whoami`/`\u`/new-file ownership read the agent name. Home stays `/home/agent`.
-- **Per-CLI state** is bind-mounted from per-agent host dirs under `<state_root>` (default `<data_dir>/state`, i.e. `~/.karakum/state`), so each CLI's settings/auth/trust/history persist across runs and stay host-owned (agent-writable, inspectable): `claude` → `~/.claude` (`<state_root>/<agent>`); `opencode` → `~/.config/opencode` + `~/.local/share/opencode`; `codex` → `~/.codex`; `pi` → `~/.pi` (config + sessions under `~/.pi/agent`; auth is env-injected, so no `auth.json` is written unless you run interactive `/login`). opencode's config is seeded once with a default model so it skips the first-run picker; pi is not seeded — you pick a model with `/model` and pi persists it in the mount.
-- **Setup hook** (optional): an agent's `memory.init` command runs in-container after the mounts land (see [configuration](docs/configuration.md)) — e.g. to link the memory framework's master prompt into each CLI's instruction file (`~/.claude/CLAUDE.md`, `~/.config/opencode/AGENTS.md`, `~/.codex/AGENTS.md`, `~/.pi/agent/AGENTS.md`).
+- **Per-CLI state** is bind-mounted from per-agent host dirs under `<state_root>` (default `<data_dir>/state`, i.e. `~/.karakum/state`), so each CLI's settings/auth/trust/history persist across runs and stay host-owned (agent-writable, inspectable): `claude` → `~/.claude` (`<state_root>/<agent>`); `opencode` → `~/.config/opencode` + `~/.local/share/opencode`; `codex` → `~/.codex`; `pi` → `~/.pi` (config + sessions under `~/.pi/agent`; auth is env-injected, so no `auth.json` is written unless you run interactive `/login`); `omp` → `~/.omp` (same shape: config + sessions under `~/.omp/agent`). opencode's config is seeded once with a default model so it skips the first-run picker; pi and omp are not seeded — you pick a model in each and they persist it in the mount.
+- **Setup hook** (optional): an agent's `memory.init` command runs in-container after the mounts land (see [configuration](docs/configuration.md)) — e.g. to link the memory framework's master prompt into each CLI's instruction file (`~/.claude/CLAUDE.md`, `~/.config/opencode/AGENTS.md`, `~/.codex/AGENTS.md`, `~/.pi/agent/AGENTS.md`, `~/.omp/agent/AGENTS.md`).
 - **Env vars**: `KARAKUM_MEMORY` (`~/<agent>`), `KARAKUM_PROJECT` (`~/<repo>` — the project's **first** repo, when set), `KARAKUM_PROJECTS` (every repo, colon-separated like `PATH`), `KARAKUM_SESSION`, `KARAKUM_AGENT`.
 
 The agent sees **only** its memory clone and (if specified) project clone — nothing else from the broader filesystem. Crucially, the **host repos' `.git` directories are never mounted**: each session is a standalone clone, so the agent cannot read or rewrite the host's branches, refs, config, or hooks. Both source repos must be git repos with `origin` remotes matching the manifest's `repository` field; the launcher fails loudly otherwise, and repoints each clone's `origin` at that remote so the agent pushes to GitHub.
@@ -218,13 +224,13 @@ Secrets are declared **host-wide** in `<config-dir>/secrets.yaml` as URI referen
 secrets:
   GH_TOKEN: env://GH_TOKEN                        # passthrough from host shell env (portable)
   CLAUDE_CODE_OAUTH_TOKEN: op://Personal/karakum claude code oauth token/credential  # 1Password
-  ANTHROPIC_API_KEY: op://Work/Anthropic/key      # codex/opencode/pi (and claude, if you skip the OAuth token)
-  OPENAI_API_KEY: op://Work/OpenAI/key            # codex + opencode + pi
+  ANTHROPIC_API_KEY: op://Work/Anthropic/key      # codex/opencode/pi/omp (and claude, if you skip the OAuth token)
+  OPENAI_API_KEY: op://Work/OpenAI/key            # codex + opencode + pi + omp
 ```
 
 > `ANTHROPIC_API_KEY` is injected into every session, so `claude` may bill against it instead of the `CLAUDE_CODE_OAUTH_TOKEN` subscription. Keep only the one you want claude to use.
 
-Claude Code authenticates from `CLAUDE_CODE_OAUTH_TOKEN` (above) — interactive `/login` doesn't work reliably in the container. The launcher also seeds `hasCompletedOnboarding` in the per-agent `~/.claude` state dir so claude skips the first-run wizard and starts straight in; settings, trusted folders, and history then persist in that host dir across runs. `codex`, `opencode`, and `pi` authenticate from `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` in the same way — no interactive login — and opencode's seeded config skips its model picker (pi is left unseeded — you pick a model with `/model`, and pi persists it in the mount). `pi` also runs on a Claude **subscription** with no secret at rest: set `ANTHROPIC_OAUTH_TOKEN` (an `sk-ant-oat` token — the same kind `claude setup-token` mints, so it can point at the same 1Password item as `CLAUDE_CODE_OAUTH_TOKEN`) *instead of* `ANTHROPIC_API_KEY`. pi resolves it from the env and sends the `anthropic-beta: oauth-2025-04-20` subscription header — nothing is written to `~/.pi/agent/auth.json`. Full pi setup, including per-machine `secrets.yaml` examples: [`docs/pi.md`](docs/pi.md).
+Claude Code authenticates from `CLAUDE_CODE_OAUTH_TOKEN` (above) — interactive `/login` doesn't work reliably in the container. The launcher also seeds `hasCompletedOnboarding` in the per-agent `~/.claude` state dir so claude skips the first-run wizard and starts straight in; settings, trusted folders, and history then persist in that host dir across runs. `codex`, `opencode`, `pi`, and `omp` authenticate from `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` in the same way — no interactive login — and opencode's seeded config skips its model picker (pi and omp are left unseeded — you pick a model in each, and each persists it in its mount). `pi` and `omp` also run on a Claude **subscription** with no secret at rest: set `ANTHROPIC_OAUTH_TOKEN` (an `sk-ant-oat` token — the same kind `claude setup-token` mints, so it can point at the same 1Password item as `CLAUDE_CODE_OAUTH_TOKEN`) *instead of* `ANTHROPIC_API_KEY`. Both resolve it from the env and send the `anthropic-beta: oauth-2025-04-20` subscription header — nothing is written to `~/.pi/agent/auth.json` or `~/.omp/agent`. Full setup, including per-machine `secrets.yaml` examples: [`docs/pi.md`](docs/pi.md) and [`docs/oh-my-pi.md`](docs/oh-my-pi.md).
 
 **Registered providers** (`karakum/secrets.py`):
 - `op://<vault>/<item>/<field>` — 1Password via `op read`.
