@@ -126,6 +126,25 @@ The one case this gets wrong: if your `config.yml` already has a top-level `skil
 block for something else, appending a second one makes a duplicate key and YAML keeps
 only the last. Add the directory with `omp config set` by hand in that case.
 
+### ⚠️ Unverified: whether this key is the mechanism
+
+One session has been run against a 24-skill vault. Two things were observed that this
+section does not explain, and neither has been chased down:
+
+- `omp config get skills.customDirectories` printed `[]`, yet the vault's skills
+  loaded anyway. So either the hook had not written `config.yml`, or `config get`
+  does not read a list back, or omp found the skills by another route entirely —
+  plausibly `~/.claude/skills`, which the same hook symlinks to the same directory.
+  Until that is pinned down, treat the key above as "what the docs say to do", not
+  as the confirmed path.
+- **20 of the 24 skills loaded.** The 4 absent ones were the 4 most recently created.
+  Nothing distinguishes them in the files — identical frontmatter keys, and not the
+  longest descriptions. Whether omp's loader caps the set or its model truncated its
+  own answer is unknown; asking for an absent skill by name would settle it.
+
+A silently capped skill set that drops the newest entries first is worth ruling out
+before relying on omp as a primary CLI.
+
 ## The `memory.init` hook
 
 `memory.init` in `agents/<name>.yaml` runs in-container after the mounts land, from
