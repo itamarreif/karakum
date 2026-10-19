@@ -40,7 +40,7 @@ proto:
     version: "1.47.2"
 
 rust:
-  version: "1.96.0"
+  version: "1.99.1"
   # rustup components — the slim base image ships the `minimal` profile, so these
   # are absent by default and `cargo clippy` / `cargo fmt` fail without them.
   # rustc-dev + llvm-tools are required by `cargo dylint` to compile lint crates
@@ -56,6 +56,12 @@ rust:
   # each tool against its published Cargo.lock, and is *mandatory* for cargo-nextest
   # — `cargo install cargo-nextest` without --locked aborts by design and fails the
   # whole build.
+  #
+  # These are unpinned, so a rebuild takes each tool's newest release — and a tool
+  # whose new release raises its MSRV past `version` above fails the build with no
+  # change on our side. That happened: cargo-dylint 6.2.0 (2026-10-16) locked a
+  # cargo-util requiring rustc 1.97 against a pinned 1.96.0. Either bump `version`
+  # or pin the offender as `name@x.y.z` when it does.
   tools:
     - cargo-nextest
     - cargo-audit
